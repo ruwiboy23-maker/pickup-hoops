@@ -214,7 +214,7 @@ const eur=x=>'€'+(Math.round(x*100)/100).toFixed(2);
 const signed=x=>(x>0.004?'+':x<-0.004?'−':'')+eur(Math.abs(x));
 
 function fresh(count){
-  const s={v:1,updatedAt:0,phase:'setup',place:'',date:today(),start:'',end:'',hours:0,rate:31.25,fee:0,prize:2,target:17,nextId:1,players:[],current:null,next:null,maxLoss:0,noShowPays:true,cutoff:'void',history:[],log:[],archive:[],startedAt:null,endedAt:null,rev:0,by:''};
+  const s={v:1,updatedAt:0,phase:'setup',place:'',date:today(),start:'',end:'',hours:0,rate:31.25,fee:0,prize:2,target:17,nextId:1,players:[],current:null,next:null,maxLoss:0,noShowPays:true,cutoff:'void',roundShare:'euro',history:[],log:[],archive:[],startedAt:null,endedAt:null,rev:0,by:''};
   for(let i=0;i<(count||15);i++)s.players.push(mkPlayer(s));
   return s;
 }
@@ -418,7 +418,7 @@ function archiveEntry(o){
   const idx={};
   const players=o.players.map((p,i)=>{idx[p.id]=i;const o={name:p.name.trim()||'Player '+p.num,played:p.played,rested:p.rested,wins:p.wins,paid:!!p.paid};if(p.ns)o.ns=true;if(p.paidAmt!=null){o.paidAmt=p.paidAmt;o.paidHow=p.paidHow;o.paidAt=p.paidAt}return o});
   const ix=ids=>ids.map(id=>idx[id]).filter(k=>k!=null);
-  return{date:o.date,start:o.start,end:o.end,place:o.place,hours:o.hours,fee:o.fee,prize:o.prize,target:o.target,maxLoss:o.maxLoss||0,players,log:(o.log||[]).slice(-60),
+  return{date:o.date,start:o.start,end:o.end,place:o.place,hours:o.hours,fee:o.fee,prize:o.prize,target:o.target,roundShare:o.roundShare||'cent',maxLoss:o.maxLoss||0,players,log:(o.log||[]).slice(-60),
     games:o.history.map(h=>({n:h.n,w:h.winner,sa:h.sa||0,sb:h.sb||0,a:ix(h.a),b:ix(h.b)}))};
 }
 function resetLabel(){
@@ -648,7 +648,7 @@ function settleHTML(e,i,tick){
     ${tick?'<p class="sub">Tap a box to mark it paid in full, in cash. Tap it again to change the amount, the method, or to undo it.</p>':''}
     <div><div class="kv"><span>You collect from players</span><b>${tick?eur(sum(1,true))+' of ':''}${eur(collect)}</b></div>
     <div class="kv"><span>You hand out to winners</span><b>${tick?eur(sum(-1,true))+' of ':''}${eur(pay)}</b></div>
-    <div class="kv"><span>Left to pay the court</span><b>${eur(collect-pay)}</b></div>${collect-pay-e.fee>0.004?`<div class="kv"><span>Extra, from rounding to the cent</span><b>${eur(collect-pay-e.fee)}</b></div>`:''}</div>
+    <div class="kv"><span>Left to pay the court</span><b>${eur(collect-pay)}</b></div>${collect-pay-e.fee>0.004?`<div class="kv"><span>Extra, from rounding the court share up${e.roundShare==='euro'?' to whole euros':''}</span><b>${eur(collect-pay-e.fee)}</b></div>`:''}</div>
     <div class="row"><button class="btn grow" data-act="copy" data-i="${i}">Copy summary for the group chat</button></div>
     ${copyShown&&copyShown.i===i&&copyShown.kind!=='games'?`<textarea id="sumText" class="sum" readonly rows="8" aria-label="Summary text">${esc(copyShown.text)}</textarea>`:''}`;
 }
@@ -662,15 +662,17 @@ function pastHist(){
    - nobody loses more than maxLoss in prizes; when that cap bites, winners are paid the same fraction of
      their winnings, rounded down to the cent, so what is handed out never exceeds what was collected. */
 function money(e){
-  const P=e.players,sh=shareOf(e.fee,P.filter(p=>!p.ns).length),cap=e.maxLoss>0?e.maxLoss:Infinity;
+  const P=e.players,sh=shareOf(e.fee,P.filter(p=>!p.ns).length,e.roundShare),cap=e.maxLoss>0?e.maxLoss:Infinity;
   const raw=P.map(p=>(2*p.wins-p.played)*e.prize),lost=raw.map(x=>x<0?Math.min(-x,cap):0);
   const pot=lost.reduce((a,b)=>a+b,0),won=raw.reduce((a,x)=>a+(x>0?x:0),0),f=won>0?Math.min(1,pot/won):1;
   return{sh,f,capped:raw.some(x=>-x>cap+0.004),rows:P.map((p,k)=>{
     const pr=raw[k]<0?-lost[k]:(f<1?Math.floor(raw[k]*f*100+1e-6)/100:raw[k]),court=p.ns?0:sh;
     return{p,k,pr,court,due:court-pr,hitCap:-raw[k]>cap+0.004}})};
 }
-function shareOf(fee,n){return n?Math.ceil(fee/n*100-1e-6)/100:0}
-function share(){return shareOf(S.fee,S.players.filter(p=>!p.ns).length)}
+/* Court share per player, always rounded up so the court is covered.
+   'euro' = up to a whole euro (8.04 becomes 9.00); 'cent' = up to the cent, as schedules saved before Nov 22 were settled. */
+function shareOf(fee,n,mode){if(!n)return 0;return mode==='euro'?Math.ceil(fee/n-1e-6):Math.ceil(fee/n*100-1e-6)/100}
+function share(){return shareOf(S.fee,S.players.filter(p=>!p.ns).length,S.roundShare)}
 function paidOut(){return S.players.reduce((n,p)=>n+p.wins,0)*S.prize}
 
 function linkBanner(){
@@ -701,7 +703,7 @@ function viewSetup(){
     <div class="stepper"><button data-act="count" data-n="-1" aria-label="One player fewer">−</button>
       <input id="count" type="number" inputmode="numeric" min="2" max="40" value="${S.players.length}" data-f="count">
       <button data-act="count" data-n="1" aria-label="One player more">+</button></div></div>
-    <p class="sub">${S.players.length>=10?`10 play each game, ${S.players.length-10} rest.`:`Fewer than 10 players, so games are ${Math.floor(S.players.length/2)}v${Math.floor(S.players.length/2)}.`} Court share: <b class="num" id="oShare">${eur(share())}</b> each.</p>
+    <p class="sub">${S.players.length>=10?`10 play each game, ${S.players.length-10} rest.`:`Fewer than 10 players, so games are ${Math.floor(S.players.length/2)}v${Math.floor(S.players.length/2)}.`} Court share: <b class="num" id="oShare">${eur(share())}</b> each${S.roundShare==='euro'?', rounded up to whole euros':''}.</p>
   </section>
   <section class="card">
     <header><h2>Names</h2><span class="sub">Blank keeps “Player 1”</span></header>
@@ -718,7 +720,7 @@ function viewSetup(){
     <div class="kv"><label for="prize">Prize per winning player (€)</label><input id="prize" type="text" inputmode="decimal" data-f="prize" value="${S.prize}"></div>
   </section>
   ${rulesCard()}
-  <button class="btn primary" data-act="attend">Start session</button>${pastHist()}`;
+  <button class="btn primary" data-act="attend">Start session</button>${pastHist()}${backupCard()}`;   // restore is reachable on a fresh, empty app too
 }
 
 function rulesCard(){
