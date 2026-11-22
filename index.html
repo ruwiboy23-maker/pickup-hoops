@@ -78,6 +78,11 @@ body.setup main.wrap{padding-block:4px 32px}
 .pts small{display:block;font-size:11px;font-weight:500;color:var(--muted);line-height:1}
 .names{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:2px;font-weight:500}
 .names li{overflow-wrap:anywhere}
+.names .pl{all:unset;box-sizing:border-box;display:block;width:100%;padding:3px 6px;margin-left:-6px;border-radius:8px;cursor:pointer;overflow-wrap:anywhere;font-weight:500}
+.names .pl:focus-visible{outline:3px solid var(--a);outline-offset:1px}
+.names .pl.on{background:var(--ink);color:var(--bg)}
+.here.swap{border-color:var(--a);background:var(--a-soft)} .here.swap span{color:var(--a)}
+.subbox{display:flex;flex-direction:column;gap:8px;background:var(--bg);border-radius:12px;padding:10px}
 .winrow{display:grid;grid-template-columns:1fr 1fr;gap:10px}
 .win{min-height:72px;border:0;border-radius:14px;font-family:var(--display);font-size:22px;line-height:1.1;padding:0 8px;text-transform:uppercase;color:var(--on-team);letter-spacing:.02em}
 .win.wa{background:var(--a)} .win.wb{background:var(--b)}
@@ -150,6 +155,9 @@ details.sched .label{display:block;border-top:1px solid var(--line);padding-top:
 .tabs button[aria-current=true]{background:var(--ink);color:var(--bg)}
 body.setup .tabs{display:none}
 .winrow.wait{opacity:.4;pointer-events:none}
+.lineup{display:flex;flex-direction:column;gap:8px;background:var(--bg);border-radius:12px;padding:10px}
+.lineup .teams>div{display:flex;flex-direction:column;gap:6px;min-width:0}
+select.slot{min-height:40px;width:100%;min-width:0;border:1px solid var(--line);border-radius:8px;background:var(--surface);color:var(--ink);font:inherit;font-size:14px;padding:0 6px}
 .filebtn{display:flex;align-items:center;justify-content:center;cursor:pointer}
 .att{display:grid;grid-template-columns:1fr 1fr;gap:8px}
 .att .here{display:flex;flex-direction:column;align-items:flex-start;justify-content:center;gap:1px;padding:6px 12px;min-height:54px;text-align:left;min-width:0}
@@ -234,7 +242,7 @@ if(link==='connecting'&&!((S.rev||0)>0&&S.by===DEV))canWrite=false;   // a devic
 /* ---------- rotation ---------- */
 const byId=id=>S.players.find(p=>p.id===id);
 const nm=id=>{const p=byId(id);return p?(p.name.trim()||'Player '+p.num):'Player'};
-const active=()=>S.players.filter(p=>p.active&&!p.away);   // the players the rotation may use right now
+const active=()=>S.players.filter(p=>p.active&&!p.away&&!p.ns);   // the players the rotation may use right now
 const listed=()=>S.players.filter(p=>p.active);
 function shuffle(a){for(let i=a.length-1;i>0;i--){const j=Math.floor(Math.random()*(i+1));[a[i],a[j]]=[a[j],a[i]]}return a}
 function restStreak(id){let n=0;for(let i=S.history.length-1;i>=0;i--){if(S.history[i].rest.indexOf(id)>=0)n++;else break}return n}
@@ -323,7 +331,7 @@ function recordWinner(side){
   armWin='';
   if(theirs>mine)logAct('Game '+c.n+' recorded as a Team '+side+' win although the score was '+theirs+'–'+mine+' for Team '+(side==='A'?'B':'A'));
   winLockUntil=Date.now()+1500;setTimeout(softRender,1550);
-  applyResult(c,side);
+  applyResult(c,side);subFor=null;
   const l=S.next&&S.next.a.length+S.next.b.length===fullSize()?S.next:lineup(poolNow());
   S.current=newGame(c.n+1,l);refreshNext();commit();
   toast('Game '+c.n+': Team '+side+' won. '+eur(S.prize)+' each.',true);
@@ -338,11 +346,12 @@ function undoLast(){
   h.rest.forEach(id=>{const p=byId(id);if(p)p.rested=Math.max(0,p.rested-1)});
   const ok=id=>{const p=byId(id);return p&&p.active&&!p.away};
   const a=h.a.filter(ok),b=h.b.filter(ok),used=a.concat(b);
-  S.current={n:h.n,a,b,rest:active().map(p=>p.id).filter(id=>used.indexOf(id)<0),sa:h.sa||0,sb:h.sb||0};
+  S.current={n:h.n,a,b,rest:active().map(p=>p.id).filter(id=>used.indexOf(id)<0),sa:h.sa||0,sb:h.sb||0,started:true};
   evenUp();winLockUntil=0;refreshNext();commit();toast('Game '+h.n+' result removed');
 }
 function redraw(){
   const c=S.current;if(!c)return;
+  if(c.started)return toast('Game '+c.n+' has started, so the teams stay as they are. Use a sub to change a player.');
   logAct('Game '+c.n+': teams redrawn'+(c.sa||c.sb?' at '+c.sa+'–'+c.sb+', score cleared':''));c.sa=0;c.sb=0;
   if(c.a.length+c.b.length!==fullSize()||c.a.length!==c.b.length){Object.assign(c,lineup(poolNow()))}
   else{const pool=poolNow().filter(x=>c.a.concat(c.b).indexOf(x.id)>=0);const l=lineup(pool);c.a=l.a;c.b=l.b}
@@ -381,7 +390,7 @@ function toggleAway(id){
   }else{
     const effs=active().map(x=>x.played+x.offset);            // joins level with the least-played player, so nobody is skipped
     p.offset=Math.max(p.offset||0,(effs.length?Math.min.apply(null,effs):0)-p.played);
-    p.away=false;if(S.current&&S.current.rest.indexOf(id)<0)S.current.rest.push(id);
+    p.away=false;delete p.ns;if(S.current&&S.current.rest.indexOf(id)<0)S.current.rest.push(id);
     logAct(nm(id)+' marked as here');refreshNext();commit();toast(nm(id)+' is here and joins the rotation from the next game.');
   }
 }
@@ -409,7 +418,7 @@ function archiveEntry(o){
   const idx={};
   const players=o.players.map((p,i)=>{idx[p.id]=i;const o={name:p.name.trim()||'Player '+p.num,played:p.played,rested:p.rested,wins:p.wins,paid:!!p.paid};if(p.ns)o.ns=true;if(p.paidAmt!=null){o.paidAmt=p.paidAmt;o.paidHow=p.paidHow;o.paidAt=p.paidAt}return o});
   const ix=ids=>ids.map(id=>idx[id]).filter(k=>k!=null);
-  return{date:o.date,start:o.start,end:o.end,place:o.place,hours:o.hours,fee:o.fee,prize:o.prize,maxLoss:o.maxLoss||0,players,log:(o.log||[]).slice(-60),
+  return{date:o.date,start:o.start,end:o.end,place:o.place,hours:o.hours,fee:o.fee,prize:o.prize,target:o.target,maxLoss:o.maxLoss||0,players,log:(o.log||[]).slice(-60),
     games:o.history.map(h=>({n:h.n,w:h.winner,sa:h.sa||0,sb:h.sb||0,a:ix(h.a),b:ix(h.b)}))};
 }
 function resetLabel(){
@@ -437,7 +446,6 @@ function endSession(){
 }
 function resumeSession(){
   const had=S.players.some(p=>p.paid||p.paidAmt);S.players.forEach(clearPay);
-  S.players.forEach(p=>{delete p.ns});
   S.phase='live';S.endedAt=null;S.current=newGame(S.history.length+1,lineup(poolNow()));logAct('Session resumed');refreshNext();commit();
   toast(had?'Session resumed. Payment ticks were cleared because the amounts can still change.':'Session resumed.');
 }
@@ -464,15 +472,71 @@ function summaryText(e){
   const rows=M.rows.map(o=>({due:o.due,t:o.p.name+': '+o.p.wins+'W '+(o.p.played-o.p.wins)+'L, court '+eur(o.court)+', prize '+signed(o.pr)+(o.hitCap?' (max loss)':'')+' = '+(o.p.ns?'no-show, not charged':o.due<-0.004?'GETS '+eur(-o.due):'PAYS '+eur(o.due))})).sort((a,b)=>b.due-a.due);
   const d=new Date(e.date+'T'+(e.start||'00:00')),when=isNaN(d.getTime())?(e.date||''):d.toLocaleDateString(undefined,{weekday:'short',day:'numeric',month:'short',year:'numeric'});
   return ['Pickup Hoops',when+(e.start?' '+e.start+(e.end?'–'+e.end:''):''),e.place].filter(Boolean).join(' · ')+'\n'
-    +e.games.length+' game'+(e.games.length===1?'':'s')+' · court '+eur(e.fee)+' ÷ '+n+' = '+eur(sh)+' each · prize '+eur(e.prize)+' per win, paid by the losing team'+(M.capped?' · max loss '+eur(e.maxLoss)+', winners get '+Math.floor(M.f*100)+'%':'')+'\n\n'
-    +rows.map(r=>r.t).join('\n');
+    +gamesOf(e)+' game'+(gamesOf(e)===1?'':'s')+' · court '+eur(e.fee)+' ÷ '+n+' = '+eur(sh)+' each · prize '+eur(e.prize)+' per win, paid by the losing team'+(M.capped?' · max loss '+eur(e.maxLoss)+', winners get '+Math.floor(M.f*100)+'%':'')+'\n\n'
+    +rows.map(r=>r.t).join('\n\n');   // a blank line between players keeps it readable in a group chat
 }
-function copySummary(i){
+/* Every game in order, with both teams and the winner, as text for the group chat. */
+function gamesText(e){
+  const nmz=ix=>ix.map(k=>(e.players[k]||{}).name||'Player').join(', ');
+  const d=new Date(e.date+'T'+(e.start||'00:00')),when=isNaN(d.getTime())?(e.date||''):d.toLocaleDateString(undefined,{weekday:'short',day:'numeric',month:'short',year:'numeric'});
+  const head=['Pickup Hoops',when+(e.start?' '+e.start+(e.end?'–'+e.end:''):''),e.place].filter(Boolean).join(' · ')+'\n'+e.games.length+' game'+(e.games.length===1?'':'s')+' · first to '+(e.target||S.target)+' · prize '+eur(e.prize)+' per win';
+  return head+'\n\n'+e.games.map(g=>{
+    const sc=g.sa||g.sb?' '+(g.w==='A'?g.sa+'–'+g.sb:g.sb+'–'+g.sa):'';
+    return 'Game '+g.n+': Team '+g.w+' won'+sc+'\n'+'Team A'+(g.w==='A'?' (won)':'')+': '+nmz(g.a)+'\n'+'Team B'+(g.w==='B'?' (won)':'')+': '+nmz(g.b);
+  }).join('\n\n');
+}
+function copyText(i,kind){
   const e=i<0?archiveEntry(S):S.archive[i];if(!e)return;
-  const text=summaryText(e);copyShown={i,text};openSet.add(i);render();
-  const sel=()=>{const ta=document.getElementById('sumText');if(ta){ta.focus();ta.select()}};
-  try{navigator.clipboard.writeText(text).then(()=>toast('Summary copied. Paste it in your group chat.'),()=>{sel();toast('Select the text below and copy it.')})}
+  const text=kind==='games'?gamesText(e):summaryText(e),what=kind==='games'?'Games':'Summary';
+  copyShown={i,text,kind};openSet.add(i);render();
+  const sel=()=>{const ta=document.getElementById(kind==='games'?'gamesText':'sumText');if(ta){ta.focus();ta.select()}};
+  try{navigator.clipboard.writeText(text).then(()=>toast(what+' copied. Paste it in your group chat.'),()=>{sel();toast('Select the text below and copy it.')})}
   catch(x){sel();toast('Select the text below and copy it.')}
+}
+const copySummary=i=>copyText(i,'summary');
+/* Wins, games and rests are always the sum of the recorded games, so a correction to a lineup recomputes them. */
+function recalcCurrent(){
+  S.players.forEach(p=>{p.played=0;p.wins=0;p.rested=0});
+  S.history.forEach(h=>{
+    h.a.concat(h.b).forEach(id=>{const p=byId(id);if(p)p.played++});
+    (h.winner==='A'?h.a:h.b).forEach(id=>{const p=byId(id);if(p)p.wins++});
+    h.rest.forEach(id=>{const p=byId(id);if(p)p.rested++});
+  });
+}
+function recalcSaved(e){
+  e.players.forEach(p=>{p.played=0;p.wins=0});
+  e.games.forEach(g=>{g.a.concat(g.b).forEach(k=>{if(e.players[k])e.players[k].played++});(g.w==='A'?g.a:g.b).forEach(k=>{if(e.players[k])e.players[k].wins++})});
+  e.players.forEach(p=>{p.rested=p.ns?0:Math.max(0,e.games.length-p.played)});
+}
+/* Amounts changed, so payment marks no longer match them. Returns whether any were cleared. */
+function clearTicks(list){const had=list.some(p=>p.paid||p.paidAmt);if(had)list.forEach(clearPay);return had}
+function logTo(i,w){if(i<0)logAct(w);else{const e=S.archive[i];e.log=e.log||[];e.log.push({t:Date.now(),w})}}
+/* Puts player k2 into one place (team, pos) of game n. Someone from the other team swaps places;
+   someone who was not playing that game takes the place, and the replaced player counts as resting. */
+function editLineup(i,n,team,pos,k2){
+  const cur=i<0,e=cur?null:S.archive[i];
+  const g=cur?S.history.find(x=>x.n===n):e&&e.games.find(x=>x.n===n);if(!g)return;
+  const key=k=>cur?(S.players[k]||{}).id:k, name=x=>cur?nm(x):((e.players[x]||{}).name||'Player');
+  const from=g[team][pos],to=key(k2),other=team==='a'?'b':'a';if(to==null||from===to)return;
+  if(g[team].indexOf(to)>=0)return toast(name(to)+' is already on that team in game '+n+'.');
+  const j=g[other].indexOf(to);
+  if(j>=0){g[other][j]=from;g[team][pos]=to}
+  else{g[team][pos]=to;if(cur){g.rest=g.rest.filter(x=>x!==to);if(g.rest.indexOf(from)<0)g.rest.push(from)}}
+  const list=cur?S.players:e.players,np=cur?byId(to):e.players[to];if(np&&np.ns)delete np.ns;
+  if(cur)recalcCurrent();else recalcSaved(e);
+  const had=(cur&&S.phase!=='done')?false:clearTicks(list);
+  logTo(i,'Game '+n+': '+name(to)+(j>=0?' and '+name(from)+' swapped teams':' played instead of '+name(from)));
+  commit();toast('Game '+n+' updated.'+(had?' Payment marks were cleared because the amounts changed.':''));
+  if(cur&&S.phase==='live')refreshNext();
+}
+function toggleNs(i,k){
+  const cur=i<0,list=cur?S.players:(S.archive[i]||{}).players,p=list&&list[k];if(!p)return;
+  if(cur&&S.phase!=='done')return;
+  if(p.played)return toast((p.name||'This player')+' played a game, so they share the court cost. Fix the game lineup first if that is wrong.');
+  p.ns=!p.ns;if(cur&&p.ns)p.away=true;
+  const had=clearTicks(list),label=cur?nm(p.id):p.name;
+  logTo(i,label+(p.ns?' marked as did not come (not charged for the court)':' marked as came (pays the court share)'));
+  commit();toast(label+(p.ns?' is no longer charged. The others’ court share was recalculated.':' pays the court share again.')+(had?' Payment marks were cleared because the amounts changed.':''));
 }
 function switchWinner(n){
   const h=S.history.find(x=>x.n===n);if(!h||S.phase==='setup')return;
@@ -515,7 +579,25 @@ function backupCard(){
       <button class="btn danger" data-act="restore">${armRestore?'Tap again. This replaces everything in the app.':'Restore this backup'}</button>`:''}
   </section>`;
 }
-function point(side,n){const c=S.current;if(!c)return;const k=side==='a'?'sa':'sb';c[k]=Math.max(0,c[k]+n);commit()}
+function point(side,n){const c=S.current;if(!c)return;const k=side==='a'?'sa':'sb';c[k]=Math.max(0,c[k]+n);if(n>0)c.started=true;commit()}
+function tipOff(){const c=S.current;if(!c||c.started)return;c.started=true;logAct('Game '+c.n+' started');commit()}
+/* Before the game starts, two players on opposite teams can trade places to balance the teams. */
+function doSwap(x,y){
+  const c=S.current;if(!c||c.started)return toast('Game '+c.n+' has started. Use a sub instead.');
+  const ia=c.a.indexOf(x),ib=c.b.indexOf(y),ja=c.a.indexOf(y),jb=c.b.indexOf(x);
+  if(ia>=0&&ib>=0){c.a[ia]=y;c.b[ib]=x}else if(ja>=0&&jb>=0){c.a[ja]=x;c.b[jb]=y}else return;
+  logAct('Game '+c.n+' (before the start): '+nm(x)+' and '+nm(y)+' swapped teams');
+  subFor=null;commit();toast(nm(x)+' and '+nm(y)+' swapped teams.');
+}
+/* A resting player comes on for one on court. The one going off rests and can come back on later in the game. */
+function doSub(outId,inId){
+  const c=S.current;if(!c)return;
+  const k=c.a.indexOf(outId)>=0?'a':c.b.indexOf(outId)>=0?'b':null;
+  if(!k||c.rest.indexOf(inId)<0)return;
+  c[k][c[k].indexOf(outId)]=inId;c.rest=c.rest.filter(x=>x!==inId);c.rest.push(outId);c.started=true;
+  logAct('Game '+c.n+': '+nm(inId)+' came on for '+nm(outId)+' (Team '+k.toUpperCase()+')');
+  subFor=null;refreshNext();commit();toast(nm(inId)+' is on for '+nm(outId)+'. The result of game '+c.n+' counts for whoever is on court at the end.');
+}
 
 /* ---------- views ---------- */
 const li=ids=>ids.map(id=>'<li>'+esc(nm(id))+'</li>').join('');
@@ -561,12 +643,14 @@ function settleHTML(e,i,tick){
         <div class="row"><button class="btn grow" data-act="payset" data-how="cash">Cash</button><button class="btn grow" data-act="payset" data-how="transfer">Transfer</button><button class="btn grow danger" data-act="payclear">Not paid</button></div></div></td></tr>`:''}`}).join('')}
     </tbody></table></div>
     ${M.capped?`<p class="sub">Max loss of ${eur(e.maxLoss)} applied. Winners receive ${Math.floor(M.f*100)}% of their winnings, so the money still adds up.</p>`:''}
+    ${tick?(z=>z.length?`<span class="label">Did not play a game</span><p class="sub">Tap anyone who did not come. They are taken out of the court split and everyone else's share is worked out again.</p>
+      <div class="att">${z.map(o=>`<button class="here${o.p.ns?' off':''}" data-act="ns" data-i="${i}" data-k="${o.k}" aria-pressed="${o.p.ns?'true':'false'}"><b>${esc(o.p.name)}</b><span>${o.p.ns?'Did not come, not charged':'Came, pays court share'}</span></button>`).join('')}</div>`:'')(e.players.map((p,k)=>({p,k})).filter(o=>!o.p.played)):''}
     ${tick?'<p class="sub">Tap a box to mark it paid in full, in cash. Tap it again to change the amount, the method, or to undo it.</p>':''}
     <div><div class="kv"><span>You collect from players</span><b>${tick?eur(sum(1,true))+' of ':''}${eur(collect)}</b></div>
     <div class="kv"><span>You hand out to winners</span><b>${tick?eur(sum(-1,true))+' of ':''}${eur(pay)}</b></div>
     <div class="kv"><span>Left to pay the court</span><b>${eur(collect-pay)}</b></div>${collect-pay-e.fee>0.004?`<div class="kv"><span>Extra, from rounding to the cent</span><b>${eur(collect-pay-e.fee)}</b></div>`:''}</div>
     <div class="row"><button class="btn grow" data-act="copy" data-i="${i}">Copy summary for the group chat</button></div>
-    ${copyShown&&copyShown.i===i?`<textarea id="sumText" class="sum" readonly rows="8" aria-label="Summary text">${esc(copyShown.text)}</textarea>`:''}`;
+    ${copyShown&&copyShown.i===i&&copyShown.kind!=='games'?`<textarea id="sumText" class="sum" readonly rows="8" aria-label="Summary text">${esc(copyShown.text)}</textarea>`:''}`;
 }
 function pastHist(){
   const A=S.archive||[];if(!A.length)return '';
@@ -655,7 +739,7 @@ function viewDone(){
       <header><h2>Session ended</h2><span class="sub">${S.history.length} game${S.history.length===1?'':'s'}</span></header>
       <p class="sub">${schedLine()}. Tick each player off once they have paid, or once you have handed them their winnings.</p>
       ${settleHTML(archiveEntry(S),-1,canWrite)}
-      ${(n=>n.length?`<p class="sub"><b>Did not play a game:</b> ${n.map(p=>esc(nm(p.id))).join(', ')}. They still share the court cost. If one of them should not pay, tap Resume session and remove them with ×.</p>`:'')(S.players.filter(p=>!p.played))}
+
     </section>
     ${canWrite?(stale=>`<section class="card${stale?' warnbox':''}">
       <header><h2>Backup</h2></header>
@@ -673,7 +757,7 @@ function viewGame(){
   const hitA=c.sa>=S.target&&c.sa>c.sb, hitB=c.sb>=S.target&&c.sb>c.sa;
   const team=(k,L,ids,sc)=>`<section class="team t${k}"><h3>Team ${L}</h3><div class="score num" aria-label="Team ${L} score">${sc}</div>
     <div class="pts ctl"><button data-act="pt" data-side="${k}" data-n="1">+1</button><button data-act="pt" data-side="${k}" data-n="2">+2<small>three</small></button><button data-act="pt" data-side="${k}" data-n="-1" aria-label="Take one point off Team ${L}">−</button></div>
-    <ol class="names">${li(ids)}</ol></section>`;
+    <ol class="names">${canWrite?ids.map(id=>`<li><button class="pl${subFor===id?' on':''}" data-act="subfor" data-id="${id}" aria-pressed="${subFor===id?'true':'false'}">${esc(nm(id))}</button></li>`).join(''):li(ids)}</ol></section>`;
   const nx=S.next;
   return `<div class="timer"><span class="label" id="tLabel">Time left</span><b id="tLeft">--:--:--</b><span class="sub">${schedLine()}</span></div><div class="stats">
       <div><b class="num">${active().length}</b><span class="label">Players</span></div>
@@ -684,6 +768,13 @@ function viewGame(){
     <section class="card">
       <header><h2>Game ${c.n}</h2><span class="sub">First to ${S.target} · threes count 2</span></header>
       <div class="teams">${team('a','A',c.a,c.sa)}${team('b','B',c.b,c.sb)}</div>
+      ${canWrite&&subFor&&c.a.concat(c.b).indexOf(subFor)>=0?(()=>{const rs=c.rest.filter(id=>{const p=byId(id);return p&&p.active&&!p.away&&!p.ns});
+        const mine=c.a.indexOf(subFor)>=0?'A':'B',opp=mine==='A'?c.b:c.a;
+        return `<div class="subbox">${c.started?'':`<span class="label">Swap ${esc(nm(subFor))} with someone on Team ${mine==='A'?'B':'A'}</span>
+          <div class="att">${opp.map(id=>`<button class="here swap" data-act="swapwith" data-id="${id}"><b>${esc(nm(id))}</b><span>${byId(id)?byId(id).wins:0} win${byId(id)&&byId(id).wins===1?'':'s'} today</span></button>`).join('')}</div>`}
+          <span class="label">${c.started?'Who comes on for '+esc(nm(subFor))+'?':'Or bring on a resting player'}</span>
+          ${rs.length?`<div class="att">${rs.map(id=>{const p=byId(id);return `<button class="here" data-act="subin" data-id="${id}"><b>${esc(nm(id))}</b><span>${p.played} game${p.played===1?'':'s'} so far</span></button>`}).join('')}</div>`:'<p class="sub">Nobody is resting right now.</p>'}
+          <button class="btn" data-act="subcancel">Cancel</button></div>`})():(canWrite?`<p class="sub ctl">${c.started?'Tap a player on court to bring on a resting player.':'Tap a player to swap teams or bring on a resting player before the game starts.'}</p>`:'')}
       <div class="winrow ctl${Date.now()<winLockUntil?' wait':''}">
         <button class="win wa${hitA?' hit':''}" data-act="win" data-side="A">Team A won</button>
         <button class="win wb${hitB?' hit':''}" data-act="win" data-side="B">Team B won</button>
@@ -693,7 +784,7 @@ function viewGame(){
       <div><span class="label">Resting (${c.rest.length})</span>
         ${c.rest.length?`<ul class="chips">${li(c.rest)}</ul>`:'<p class="sub">Nobody. Everyone is on court.</p>'}</div>
       ${(k=>k===1?'<p class="sub fair">After this game everyone has played the same number of games. A fair point to stop.</p>':k>1?`<p class="sub">Everyone is level again in ${k} games, counting this one.</p>`:'')(gamesToLevel())}
-      <div class="row ctl"><button class="btn grow" data-act="redraw">${armRedraw?'Tap again. The score '+c.sa+'–'+c.sb+' will be cleared.':'Redraw teams'}</button>
+      <div class="row ctl">${c.started?'':`<button class="btn grow" data-act="tipoff">Start game ${c.n}</button><button class="btn grow" data-act="redraw">Redraw teams</button>`}
         ${S.history.length?'<button class="btn grow" data-act="undo">Undo last result</button>':''}</div>
     </section>
     ${nx?`<section class="card">
@@ -752,20 +843,30 @@ function schedHead(s){
   const when=isNaN(d.getTime())?esc(s.date||'No date'):d.toLocaleDateString(undefined,{weekday:'short',day:'numeric',month:'short',year:'numeric'});
   return when+(s.start?' · '+esc(s.start)+(s.end?'–'+esc(s.end):''):'');
 }
+const gamesOf=e=>e.games.length||e.gamesCount||0;
 function schedCard(s,i,now){
   const prizes=s.players.reduce((t,p)=>t+p.wins,0)*s.prize;
   const nmz=ix=>ix.map(k=>esc((s.players[k]||{}).name||'Player')).join(', ');
   return `<section class="card"><details class="past sched" data-i="${i}"${openSet.has(i)||armDel===i?' open':''}>
-    <summary><b>${schedHead(s)}</b>${now?` <span class="pill">${S.phase==='done'?'Ended':'Now'}</span>`:''}<span class="sub">${s.place?esc(s.place)+' · ':''}${s.games.length} game${s.games.length===1?'':'s'} · court ${eur(s.fee)} · prizes ${eur(prizes)}</span></summary>
+    <summary><b>${schedHead(s)}</b>${now?` <span class="pill">${S.phase==='done'?'Ended':'Now'}</span>`:''}<span class="sub">${s.place?esc(s.place)+' · ':''}${gamesOf(s)} game${gamesOf(s)===1?'':'s'} · court ${eur(s.fee)} · prizes ${eur(prizes)}</span></summary>
     ${s.games.length?s.games.slice().reverse().map(g=>`<div class="game">
       <div class="head"><b>Game ${g.n}</b><span class="pill">Team ${g.w} won${g.sa||g.sb?' '+(g.w==='A'?g.sa+'–'+g.sb:g.sb+'–'+g.sa):''}</span></div>
       <div class="line ${g.w==='A'?'won':''}"><span class="dotA"></span>Team A: ${nmz(g.a)}</div>
       <div class="line ${g.w==='B'?'won':''}"><span class="dotB"></span>Team B: ${nmz(g.b)}</div>
       <div class="line">Winning players (+${eur(s.prize)} each): ${nmz(g.w==='A'?g.a:g.b)}</div>
       <div class="line">Losing players (−${eur(s.prize)} each): ${nmz(g.w==='A'?g.b:g.a)}</div>
+      ${canWrite?(()=>{const open=editGame&&editGame.i===i&&editGame.n===g.n;
+        const opts=sel=>s.players.map((p,k)=>`<option value="${k}"${k===sel?' selected':''}>${esc(p.name)}</option>`).join('');
+        const slots=(t,ix)=>ix.map((k,pos)=>`<select class="slot" data-i="${i}" data-n="${g.n}" data-t="${t}" data-pos="${pos}" aria-label="Team ${t.toUpperCase()}, place ${pos+1}">${opts(k)}</select>`).join('');
+        return `<button class="btn ctl sw" data-act="editgame" data-i="${i}" data-n="${g.n}">${open?'Done editing':'Fix who played (subs)'}</button>
+        ${open?`<div class="lineup"><p class="sub">Pick who actually played at the end of the game. They get the win or loss of game ${g.n}. Picking someone from the other team swaps the two.</p>
+          <div class="teams"><div><span class="label dotA">Team A</span>${slots('a',g.a)}</div><div><span class="label dotB">Team B</span>${slots('b',g.b)}</div></div></div>`:''}`})():''}
       ${now&&canWrite?`<button class="btn ctl sw" data-act="switch" data-n="${g.n}">${armSwitch===g.n?'Tap again: Team '+(g.w==='A'?'B':'A')+' won instead':'Wrong winner? Switch'}</button>`:''}
-    </div>`).join(''):'<p class="empty">No finished games yet. Pick a winner on the Game tab and it shows up here.</p>'}
-    ${s.games.length?`<span class="label">Payments for this schedule</span>${settleHTML(s,i,canWrite&&(!now||S.phase==='done'))}`:''}
+    </div>`).join(''):(s.imported?'':'<p class="empty">No finished games yet. Pick a winner on the Game tab and it shows up here.</p>')}
+    ${s.games.length?`<div class="row"><button class="btn grow" data-act="copygames" data-i="${i}">Copy games and teams for the group chat</button></div>
+    ${copyShown&&copyShown.i===i&&copyShown.kind==='games'?`<textarea id="gamesText" class="sum" readonly rows="10" aria-label="Games and teams text">${esc(copyShown.text)}</textarea>`:''}`:''}
+    ${s.imported&&!s.games.length?'<p class="sub">Imported from the summary text. Wins and losses per player are kept, but the teams of each game are not, so subs cannot be fixed here.</p>':''}
+    ${gamesOf(s)?`<span class="label">Payments for this schedule</span>${settleHTML(s,i,canWrite&&(!now||S.phase==='done'))}`:''}
     ${logHTML(s,now)}
     ${now?'':`<button class="btn danger ctl" data-act="delpast" data-i="${i}">${armDel===i?'Tap again to delete':'Delete this schedule'}</button>`}
   </details></section>`;
@@ -794,7 +895,7 @@ function clock(){
   const low=S.phase==='live'&&now>=a&&now<z&&z-now<=600000,tm=$('.timer');if(tm)tm.classList.toggle('low',low);
   if(low&&warnedEnd!==z&&canWrite){warnedEnd=z;toast(Math.ceil((z-now)/60000)+' minutes of court time left.');try{navigator.vibrate&&navigator.vibrate([200,100,200])}catch(e){}}
 }
-let toastT,attend=false,winLockUntil=0,armWin='',armSwitch=0,armRestore=false,armRedraw=false,payEdit=null,backupText='',restoreOpen=false,restoreDraft='',warnedEnd=0;
+let toastT,attend=false,winLockUntil=0,armWin='',armSwitch=0,armRestore=false,armRedraw=false,payEdit=null,editGame=null,subFor=null,backupText='',restoreOpen=false,restoreDraft='',warnedEnd=0;
 function toast(msg,undo){$('#toastMsg').textContent=msg;$('#toastUndo').hidden=!undo;$('#toast').hidden=false;clearTimeout(toastT);toastT=setTimeout(()=>{$('#toast').hidden=true},6000)}
 
 /* ---------- saving ---------- */
@@ -856,6 +957,7 @@ document.addEventListener('click',e=>{
   const act=b.dataset.act;
   if(act==='tab'){tab=b.dataset.tab;try{localStorage.setItem(LS+'-tab',tab)}catch(x){}armReset=false;armEnd=false;armRedraw=false;copyShown=null;payEdit=null;backupText='';restoreOpen=false;armSwitch=0;render();window.scrollTo(0,0);return}
   if(act==='copy'){copySummary(Number(b.dataset.i));return}
+  if(act==='copygames'){copyText(Number(b.dataset.i),'games');return}
   if(act==='reload'){location.reload();return}
   if(act==='local'){if(armLocal){allowLocal=true;armLocal=false;canWrite=true;setSync('This phone only',true);render()}else{armLocal=true;render();setTimeout(()=>{if(armLocal){armLocal=false;softRender()}},4000)}return}
   if(!canWrite)return;
@@ -870,7 +972,14 @@ document.addEventListener('click',e=>{
   else if(act==='pt')point(b.dataset.side,Number(b.dataset.n));
   else if(act==='win')recordWinner(b.dataset.side);
   else if(act==='undo'){$('#toast').hidden=true;undoLast()}
-  else if(act==='redraw'){const c=S.current;if(c&&(c.sa||c.sb)&&!armRedraw){armRedraw=true;render();setTimeout(()=>{if(armRedraw){armRedraw=false;softRender()}},4000)}else{armRedraw=false;redraw()}}
+  else if(act==='redraw')redraw();
+  else if(act==='tipoff')tipOff();
+  else if(act==='subfor'){subFor=subFor===b.dataset.id?null:b.dataset.id;render()}
+  else if(act==='subin'){if(subFor)doSub(subFor,b.dataset.id)}
+  else if(act==='swapwith'){if(subFor)doSwap(subFor,b.dataset.id)}
+  else if(act==='subcancel'){subFor=null;render()}
+  else if(act==='editgame'){const i=Number(b.dataset.i),n=Number(b.dataset.n);editGame=editGame&&editGame.i===i&&editGame.n===n?null:{i,n};openSet.add(i);render()}
+  else if(act==='ns')toggleNs(Number(b.dataset.i),Number(b.dataset.k));
   else if(act==='switch'){const n=Number(b.dataset.n);if(armSwitch===n)switchWinner(n);else{armSwitch=n;render();setTimeout(()=>{if(armSwitch===n){armSwitch=0;softRender()}},4000)}}
   else if(act==='backup')copyBackup();
   else if(act==='backupfile')saveBackupFile();
@@ -900,6 +1009,10 @@ document.addEventListener('change',e=>{
 document.addEventListener('change',e=>{
   const el=e.target;if(!el||el.id!=='restoreFile'||!el.files||!el.files[0])return;
   const r=new FileReader();r.onload=()=>{restoreDraft=String(r.result||'');restoreOpen=true;armRestore=false;backupText='';render();toast('File loaded. Tap “Restore this backup” to replace what is in the app.')};r.onerror=()=>toast('That file could not be read.');r.readAsText(el.files[0]);
+});
+document.addEventListener('change',e=>{
+  const el=e.target;if(!el||!el.classList||!el.classList.contains('slot')||!canWrite)return;
+  editLineup(Number(el.dataset.i),Number(el.dataset.n),el.dataset.t,Number(el.dataset.pos),Number(el.value));
 });
 document.addEventListener('focusout',()=>setTimeout(()=>{if(needsRender&&!typing())render()},350));
 document.addEventListener('input',e=>{
