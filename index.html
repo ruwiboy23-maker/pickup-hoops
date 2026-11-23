@@ -82,6 +82,13 @@ body.setup main.wrap{padding-block:4px 32px}
 .names .pl:focus-visible{outline:3px solid var(--a);outline-offset:1px}
 .names .pl.on{background:var(--ink);color:var(--bg)}
 .here.swap{border-color:var(--a);background:var(--a-soft)} .here.swap span{color:var(--a)}
+.gbox{display:flex;flex-direction:column;gap:6px;border:1px solid var(--line);border-radius:12px;padding:10px}
+.gbox .grow2{display:grid;grid-template-columns:1fr 44px;gap:8px}
+.gpick{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1.2fr);gap:6px 10px;align-items:center}
+.gpick label{overflow-wrap:anywhere;font-size:15px}
+details.past.grp{border-top:0;padding-top:0} details.grp summary b{font-family:var(--display);font-size:20px;text-transform:uppercase}
+details.grp>*+*{margin-top:10px}
+tr.grph td{background:var(--bg);text-align:left;white-space:normal;padding-top:10px}
 .subbox{display:flex;flex-direction:column;gap:8px;background:var(--bg);border-radius:12px;padding:10px}
 .winrow{display:grid;grid-template-columns:1fr 1fr;gap:10px}
 .win{min-height:72px;border:0;border-radius:14px;font-family:var(--display);font-size:22px;line-height:1.1;padding:0 8px;text-transform:uppercase;color:var(--on-team);letter-spacing:.02em}
@@ -119,7 +126,9 @@ input[type=text],input[type=number],input[type=date],input[type=time]{min-height
 .roster{display:flex;flex-direction:column;gap:8px}
 .roster .r{display:grid;grid-template-columns:28px 1fr 62px 44px;gap:8px;align-items:center}
 .here{min-height:44px;border-radius:10px;border:1px solid var(--good);background:var(--good-soft);color:var(--good);font-size:14px;font-weight:600;padding:0}
-.here.off{border-color:var(--line);background:var(--surface);color:var(--muted)}
+.here.off,.here.st-late{border-color:var(--line);background:var(--surface);color:var(--muted)}
+.here.st-out{border-color:var(--line);border-style:dashed;background:var(--bg);color:var(--warn)}
+.att .here.st-out b{color:var(--muted);text-decoration:line-through}
 .roster .n{color:var(--muted);text-align:right;font-variant-numeric:tabular-nums}
 .x{min-height:44px;border-radius:10px;border:1px solid var(--line);background:var(--surface);font-size:20px;line-height:1}
 .stepper{display:grid;grid-template-columns:56px 1fr 56px;gap:8px}
@@ -214,7 +223,7 @@ const eur=x=>'€'+(Math.round(x*100)/100).toFixed(2);
 const signed=x=>(x>0.004?'+':x<-0.004?'−':'')+eur(Math.abs(x));
 
 function fresh(count){
-  const s={v:1,updatedAt:0,phase:'setup',place:'',date:today(),start:'',end:'',hours:0,rate:31.25,fee:0,prize:2,target:17,nextId:1,players:[],current:null,next:null,maxLoss:0,noShowPays:true,cutoff:'void',roundShare:'euro',history:[],log:[],archive:[],startedAt:null,endedAt:null,rev:0,by:''};
+  const s={v:1,updatedAt:0,phase:'setup',place:'',date:today(),start:'',end:'',hours:0,rate:31.25,fee:0,prize:2,target:17,nextId:1,players:[],current:null,next:null,maxLoss:0,noShowPays:true,cutoff:'void',roundShare:'euro',groups:[],nextG:0,history:[],log:[],archive:[],startedAt:null,endedAt:null,rev:0,by:''};
   for(let i=0;i<(count||15);i++)s.players.push(mkPlayer(s));
   return s;
 }
@@ -242,8 +251,9 @@ if(link==='connecting'&&!((S.rev||0)>0&&S.by===DEV))canWrite=false;   // a devic
 /* ---------- rotation ---------- */
 const byId=id=>S.players.find(p=>p.id===id);
 const nm=id=>{const p=byId(id);return p?(p.name.trim()||'Player '+p.num):'Player'};
-const active=()=>S.players.filter(p=>p.active&&!p.away&&!p.ns);   // the players the rotation may use right now
-const listed=()=>S.players.filter(p=>p.active);
+const inSession=()=>S.players.filter(p=>!p.out);                       // the player list is the database; "out" = not coming today
+const active=()=>S.players.filter(p=>p.active&&!p.away&&!p.ns&&!p.out);   // the players the rotation may use right now
+const listed=()=>S.players.filter(p=>p.active&&!p.out);
 function shuffle(a){for(let i=a.length-1;i>0;i--){const j=Math.floor(Math.random()*(i+1));[a[i],a[j]]=[a[j],a[i]]}return a}
 function restStreak(id){let n=0;for(let i=S.history.length-1;i>=0;i--){if(S.history[i].rest.indexOf(id)>=0)n++;else break}return n}
 /* Win rate from past schedules, matched by name. Unnamed players and new names count as average (0.5). */
@@ -378,9 +388,11 @@ function pullFromGame(id){
   return evenUp();
 }
 /* Late arrivals and short breaks: the player stays on the list (and in the court share) but the rotation skips them. */
+const statusOf=p=>p.out?'out':p.away?'late':'here';
+const statusLabel={here:'Here',late:'Late',out:'Not coming'};
 function toggleAway(id){
   const p=byId(id);if(!p||!p.active)return;
-  if(S.phase==='setup'){p.away=!p.away;return commit()}
+  if(S.phase==='setup'){const st=statusOf(p);if(st==='here'){p.away=true}else if(st==='late'){p.away=false;p.out=true}else{p.out=false;p.away=false}return commit()}
   if(!p.away){
     if(active().length<=2)return toast('At least 2 players must stay in the rotation.');
     const onCourt=!!S.current&&S.current.a.concat(S.current.b).indexOf(id)>=0,label=nm(id);
@@ -393,6 +405,10 @@ function toggleAway(id){
     p.away=false;delete p.ns;if(S.current&&S.current.rest.indexOf(id)<0)S.current.rest.push(id);
     logAct(nm(id)+' marked as here');refreshNext();commit();toast(nm(id)+' is here and joins the rotation from the next game.');
   }
+}
+function cameAnyway(id){
+  const p=byId(id);if(!p||!p.out||S.phase!=='live')return;
+  p.out=false;p.away=true;logAct(nm(id)+' came after all (was marked as not coming); now shares the court cost');toggleAway(id);
 }
 function removePlayer(id){
   const p=byId(id);if(!p)return;
@@ -416,9 +432,9 @@ function setCount(n){
 }
 function archiveEntry(o){
   const idx={};
-  const players=o.players.map((p,i)=>{idx[p.id]=i;const o={name:p.name.trim()||'Player '+p.num,played:p.played,rested:p.rested,wins:p.wins,paid:!!p.paid};if(p.ns)o.ns=true;if(p.paidAmt!=null){o.paidAmt=p.paidAmt;o.paidHow=p.paidHow;o.paidAt=p.paidAt}return o});
+  const players=o.players.filter(p=>!p.out).map((p,i)=>{idx[p.id]=i;const o={name:p.name.trim()||'Player '+p.num,played:p.played,rested:p.rested,wins:p.wins,paid:!!p.paid};if(p.ns)o.ns=true;if(p.g)o.g=p.g;if(p.collect)o.collect=true;if(p.paidAmt!=null){o.paidAmt=p.paidAmt;o.paidHow=p.paidHow;o.paidAt=p.paidAt}return o});
   const ix=ids=>ids.map(id=>idx[id]).filter(k=>k!=null);
-  return{date:o.date,start:o.start,end:o.end,place:o.place,hours:o.hours,fee:o.fee,prize:o.prize,target:o.target,roundShare:o.roundShare||'cent',maxLoss:o.maxLoss||0,players,log:(o.log||[]).slice(-60),
+  return{date:o.date,start:o.start,end:o.end,place:o.place,hours:o.hours,fee:o.fee,prize:o.prize,target:o.target,roundShare:o.roundShare||'cent',maxLoss:o.maxLoss||0,groups:(o.groups||[]).map(g=>({id:g.id,name:g.name})),players,log:(o.log||[]).slice(-60),
     games:o.history.map(h=>({n:h.n,w:h.winner,sa:h.sa||0,sb:h.sb||0,a:ix(h.a),b:ix(h.b)}))};
 }
 function resetLabel(){
@@ -430,7 +446,8 @@ function newSession(){
   let arch=(old.archive||[]).concat(old.history.length?[archiveEntry(old)]:[]),dropped=0;
   while(arch.length>MAX_ARCHIVE){arch.shift();dropped++}
   S.archive=arch;
-  old.players.forEach(o=>{const p=mkPlayer(S);p.name=o.name;S.players.push(p)});
+  S.groups=(old.groups||[]).map(g=>({id:g.id,name:g.name}));S.nextG=old.nextG||0;
+  old.players.forEach(o=>{const p=mkPlayer(S);p.name=o.name;if(o.g)p.g=o.g;if(o.collect)p.collect=true;S.players.push(p)});
   if(!S.players.length)S=Object.assign(fresh(15),{prize:old.prize,archive:S.archive,rev:old.rev||0});
   while(JSON.stringify(S).length>180000&&S.archive.length>1){S.archive.shift();dropped++}   // stay well under the storage limit of one document
   armReset=false;armEnd=false;attend=false;copyShown=null;payEdit=null;tab='game';commit();
@@ -440,16 +457,16 @@ function endSession(){
   const c=S.current,side=cutoffSide();
   if(side){applyResult(c,side);logAct('Game '+c.n+' was cut off at '+c.sa+'–'+c.sb+' and counts as a Team '+side+' win (leader wins rule)')}
   logAct('Session ended after '+S.history.length+' game'+(S.history.length===1?'':'s')+(!side&&c&&(c.sa||c.sb)?'; game '+c.n+' was left unfinished at '+c.sa+'–'+c.sb+' and is not counted':''));
-  if(S.noShowPays===false){const ns=S.players.filter(p=>p.active&&p.away&&!p.played);ns.forEach(p=>{p.ns=true});if(ns.length)logAct('Not charged for the court (never came): '+ns.map(p=>nm(p.id)).join(', '))}
+  if(S.noShowPays===false){const ns=inSession().filter(p=>p.active&&p.away&&!p.played);ns.forEach(p=>{p.ns=true});if(ns.length)logAct('Not charged for the court (never came): '+ns.map(p=>nm(p.id)).join(', '))}
   S.phase='done';S.endedAt=Date.now();S.current=null;S.next=null;armEnd=false;tab='game';commit();
   toast('Session ended. Tick players off as they pay.');
 }
 function resumeSession(){
-  const had=S.players.some(p=>p.paid||p.paidAmt);S.players.forEach(clearPay);
+  const had=inSession().some(p=>p.paid||p.paidAmt);inSession().forEach(clearPay);
   S.phase='live';S.endedAt=null;S.current=newGame(S.history.length+1,lineup(poolNow()));logAct('Session resumed');refreshNext();commit();
   toast(had?'Session resumed. Payment ticks were cleared because the amounts can still change.':'Session resumed.');
 }
-const payTarget=(i,k)=>i<0?(S.phase==='done'?S.players[k]:null):(S.archive[i]&&S.archive[i].players[k]);
+const payTarget=(i,k)=>i<0?(S.phase==='done'?inSession()[k]:null):(S.archive[i]&&S.archive[i].players[k]);
 const payEntry=i=>i<0?archiveEntry(S):S.archive[i];
 function clearPay(p){p.paid=false;delete p.paidAmt;delete p.paidHow;delete p.paidAt}
 /* First tap: paid in full, cash. A tap on a row that already has a payment opens the editor instead. */
@@ -469,11 +486,15 @@ function paySet(how){
 function payClear(){if(!payEdit)return;const p=payTarget(payEdit.i,payEdit.k);if(p)clearPay(p);payEdit=null;commit()}
 function summaryText(e){
   const M=money(e),sh=M.sh,n=e.players.filter(p=>!p.ns).length;
-  const rows=M.rows.map(o=>({due:o.due,t:o.p.name+': '+o.p.wins+'W '+(o.p.played-o.p.wins)+'L, court '+eur(o.court)+', prize '+signed(o.pr)+(o.hitCap?' (max loss)':'')+' = '+(o.p.ns?'no-show, not charged':o.due<-0.004?'GETS '+eur(-o.due):'PAYS '+eur(o.due))})).sort((a,b)=>b.due-a.due);
+  const rows=M.rows.map(o=>({p:o.p,due:o.due,t:o.p.name+': '+o.p.wins+'W '+(o.p.played-o.p.wins)+'L, court '+eur(o.court)+', prize '+signed(o.pr)+(o.hitCap?' (max loss)':'')+' = '+(o.p.ns?'no-show, not charged':o.due<-0.004?'GETS '+eur(-o.due):'PAYS '+eur(o.due))})).sort((a,b)=>b.due-a.due);
   const d=new Date(e.date+'T'+(e.start||'00:00')),when=isNaN(d.getTime())?(e.date||''):d.toLocaleDateString(undefined,{weekday:'short',day:'numeric',month:'short',year:'numeric'});
   return ['Pickup Hoops',when+(e.start?' '+e.start+(e.end?'–'+e.end:''):''),e.place].filter(Boolean).join(' · ')+'\n'
     +gamesOf(e)+' game'+(gamesOf(e)===1?'':'s')+' · court '+eur(e.fee)+' ÷ '+n+' = '+eur(sh)+' each · prize '+eur(e.prize)+' per win, paid by the losing team'+(M.capped?' · max loss '+eur(e.maxLoss)+', winners get '+Math.floor(M.f*100)+'%':'')+'\n\n'
-    +rows.map(r=>r.t).join('\n\n');   // a blank line between players keeps it readable in a group chat
+    +((e.groups||[]).length
+      ?groupTotals(e,rows).map(g=>'== '+g.name+' · '+(g.id?(g.collector?'collector: '+g.collector:'no collector yet'):'organizer collects')+' ==\n\n'
+          +g.rows.map(r=>r.t).join('\n\n')
+          +'\n\n'+g.name+' total: collect '+eur(g.collect)+', give '+eur(g.give)+' to winners, hand over '+eur(g.collect-g.give)).join('\n\n\n')
+      :rows.map(r=>r.t).join('\n\n'));   // a blank line between players keeps it readable in a group chat
 }
 /* Every game in order, with both teams and the winner, as text for the group chat. */
 function gamesText(e){
@@ -516,13 +537,13 @@ function logTo(i,w){if(i<0)logAct(w);else{const e=S.archive[i];e.log=e.log||[];e
 function editLineup(i,n,team,pos,k2){
   const cur=i<0,e=cur?null:S.archive[i];
   const g=cur?S.history.find(x=>x.n===n):e&&e.games.find(x=>x.n===n);if(!g)return;
-  const key=k=>cur?(S.players[k]||{}).id:k, name=x=>cur?nm(x):((e.players[x]||{}).name||'Player');
+  const key=k=>cur?(inSession()[k]||{}).id:k, name=x=>cur?nm(x):((e.players[x]||{}).name||'Player');
   const from=g[team][pos],to=key(k2),other=team==='a'?'b':'a';if(to==null||from===to)return;
   if(g[team].indexOf(to)>=0)return toast(name(to)+' is already on that team in game '+n+'.');
   const j=g[other].indexOf(to);
   if(j>=0){g[other][j]=from;g[team][pos]=to}
   else{g[team][pos]=to;if(cur){g.rest=g.rest.filter(x=>x!==to);if(g.rest.indexOf(from)<0)g.rest.push(from)}}
-  const list=cur?S.players:e.players,np=cur?byId(to):e.players[to];if(np&&np.ns)delete np.ns;
+  const list=cur?inSession():e.players,np=cur?byId(to):e.players[to];if(np&&np.ns)delete np.ns;
   if(cur)recalcCurrent();else recalcSaved(e);
   const had=(cur&&S.phase!=='done')?false:clearTicks(list);
   logTo(i,'Game '+n+': '+name(to)+(j>=0?' and '+name(from)+' swapped teams':' played instead of '+name(from)));
@@ -530,7 +551,7 @@ function editLineup(i,n,team,pos,k2){
   if(cur&&S.phase==='live')refreshNext();
 }
 function toggleNs(i,k){
-  const cur=i<0,list=cur?S.players:(S.archive[i]||{}).players,p=list&&list[k];if(!p)return;
+  const cur=i<0,list=cur?inSession():(S.archive[i]||{}).players,p=list&&list[k];if(!p)return;
   if(cur&&S.phase!=='done')return;
   if(p.played)return toast((p.name||'This player')+' played a game, so they share the court cost. Fix the game lineup first if that is wrong.');
   p.ns=!p.ns;if(cur&&p.ns)p.away=true;
@@ -538,12 +559,46 @@ function toggleNs(i,k){
   logTo(i,label+(p.ns?' marked as did not come (not charged for the court)':' marked as came (pays the court share)'));
   commit();toast(label+(p.ns?' is no longer charged. The others’ court share was recalculated.':' pays the court share again.')+(had?' Payment marks were cleared because the amounts changed.':''));
 }
+/* Groups: each player can belong to one group, and one member of a group collects its payments. */
+function addGroup(){S.groups=S.groups||[];S.nextG=(S.nextG||0)+1;S.groups.push({id:'g'+S.nextG,name:'Group '+(S.groups.length+1)});groupsOpen=true;commit()}
+function delGroup(id){const g=(S.groups||[]).find(x=>x.id===id);if(!g)return;S.groups=S.groups.filter(x=>x.id!==id);S.players.forEach(p=>{if(p.g===id){delete p.g;delete p.collect}});armDelGroup='';commit();toast(g.name+' deleted. Its players have no group now.')}
+function groupChange(el,f){
+  if(f==='gname'){const g=(S.groups||[]).find(x=>x.id===el.dataset.g);if(!g)return;const v=el.value.trim().slice(0,24);if(v)g.name=v;else el.value=g.name;needsRender=true;stamp();cache();queuePush();return}
+  if(f==='gby'){const gid=el.dataset.g;S.players.forEach(p=>{if(p.g===gid)delete p.collect});const p=byId(el.value);if(p&&p.g===gid)p.collect=true;commit();return}
+  if(f==='pgroup'){const p=byId(el.dataset.id);if(!p)return;delete p.collect;if(el.value)p.g=el.value;else delete p.g;commit()}
+}
+function groupsCard(){
+  if(!canWrite)return '';
+  const G=S.groups||[],L=S.players.filter(p=>p.active),col=g=>L.find(p=>p.g===g.id&&p.collect);
+  return `<section class="card"><details class="past grp"${groupsOpen?' open':''}>
+    <summary><b>Groups</b><span class="sub">${G.length?G.length+' group'+(G.length===1?'':'s')+', '+L.filter(p=>p.g).length+' of '+L.length+' players in a group':'Optional. One person collects the payments of each group.'}</span></summary>
+    ${G.map(g=>{const m=L.filter(p=>p.g===g.id),c=col(g);return `<div class="gbox">
+      <div class="grow2"><input type="text" id="gname-${g.id}" data-f="gname" data-g="${g.id}" value="${esc(g.name)}" maxlength="24" aria-label="Group name">
+        <button class="x" data-act="delgroup" data-g="${g.id}" aria-label="Delete ${esc(g.name)}">${armDelGroup===g.id?'✓':'×'}</button></div>
+      <label class="sub" for="gby-${g.id}">Collects the payments</label>
+      <select id="gby-${g.id}" class="slot" data-f="gby" data-g="${g.id}"><option value="">${m.length?'Nobody yet':'Add players to this group first'}</option>${m.map(p=>`<option value="${p.id}"${c===p?' selected':''}>${esc(nm(p.id))}</option>`).join('')}</select>
+      <p class="sub">${m.length?m.length+' player'+(m.length===1?'':'s')+': '+m.map(p=>esc(nm(p.id))).join(', '):'No players yet.'}</p>
+    </div>`}).join('')}
+    <button class="btn" data-act="addgroup">+ Add group</button>
+    ${G.length?`<span class="label">Who is in which group</span>
+    <div class="gpick">${L.map(p=>`<label for="pg-${p.id}">${esc(nm(p.id))}</label><select id="pg-${p.id}" class="slot" data-f="pgroup" data-id="${p.id}"><option value="">No group</option>${G.map(g=>`<option value="${g.id}"${p.g===g.id?' selected':''}>${esc(g.name)}</option>`).join('')}</select>`).join('')}</div>`:''}
+  </details></section>`;
+}
+/* Per-group totals for the payments. Players without a group are collected by the organizer. */
+function groupTotals(e,rows){
+  const G=(e.groups||[]).slice(),out=[];
+  const one=(id,name)=>{const r=rows.filter(o=>id?o.p.g===id:!(G.some(g=>g.id===o.p.g)));if(!r.length&&id===null)return;
+    const c=r.find(o=>o.p.collect);const sum=(sign,done)=>r.reduce((n,o)=>n+(sign*o.due>0?(done?o.got||0:Math.abs(o.due)):0),0);
+    out.push({id,name,rows:r,collector:c?c.p.name:'',collect:sum(1),give:sum(-1),gotIn:sum(1,true),gotOut:sum(-1,true)})};
+  G.forEach(g=>one(g.id,g.name));one(null,'No group');
+  return out;
+}
 function switchWinner(n){
   const h=S.history.find(x=>x.n===n);if(!h||S.phase==='setup')return;
   (h.winner==='A'?h.a:h.b).forEach(id=>{const p=byId(id);if(p)p.wins=Math.max(0,p.wins-1)});
   h.winner=h.winner==='A'?'B':'A';
   (h.winner==='A'?h.a:h.b).forEach(id=>{const p=byId(id);if(p)p.wins++});
-  const had=S.players.some(p=>p.paid||p.paidAmt);if(had)S.players.forEach(clearPay);
+  const had=inSession().some(p=>p.paid||p.paidAmt);if(had)inSession().forEach(clearPay);
   logAct('Game '+n+' winner switched to Team '+h.winner);
   armSwitch=0;commit();toast('Game '+n+' now counts as a Team '+h.winner+' win.'+(had?' Payment ticks were cleared because the amounts changed.':''));
 }
@@ -636,11 +691,12 @@ const gotOf=(p,abs)=>p.paidAmt!=null?p.paidAmt:(p.paid?abs:0);
 function settleHTML(e,i,tick){
   const M=money(e),rows=M.rows.map(o=>Object.assign(o,{abs:Math.abs(o.due),got:gotOf(o.p,Math.abs(o.due))})).sort((x,y)=>y.due-x.due);
   const sum=(sign,done)=>rows.reduce((n,o)=>n+(sign*o.due>0?(done?o.got:o.abs):0),0);
+  const GT=(e.groups||[]).length?groupTotals(e,rows):null;
   const collect=sum(1),pay=sum(-1),hm=t=>{const d=new Date(t);return String(d.getHours()).padStart(2,'0')+':'+String(d.getMinutes()).padStart(2,'0')};
   return `<div class="scroll"><table><thead><tr><th>Player</th>${tick?'<th>Court<br>Prize</th>':'<th>Court</th><th>Prize</th>'}<th>Total</th>${tick?'<th>Done</th>':''}</tr></thead><tbody>
-    ${rows.map(o=>{const gets=o.due<-0.004,part=o.got>0.004&&!o.p.paid,ed=tick&&payEdit&&payEdit.i===i&&payEdit.k===o.k;
+    ${(GT?GT:[{rows}]).map(grp=>(GT?`<tr class="grph"><td colspan="4"><b>${esc(grp.name)}</b>${grp.id?` · ${grp.collector?'collector: '+esc(grp.collector):'no collector yet'}`:' · organizer collects'}<span class="sub wl">Collect ${tick?eur(grp.gotIn)+' of ':''}${eur(grp.collect)} · give ${eur(grp.give)} · hand over ${eur(grp.collect-grp.give)}</span></td></tr>`:'')+grp.rows.map(o=>{const gets=o.due<-0.004,part=o.got>0.004&&!o.p.paid,ed=tick&&payEdit&&payEdit.i===i&&payEdit.k===o.k;
       return `<tr class="${o.p.paid?'paid':''}"><td>${esc(o.p.name)} <span class="sub wl">${o.p.wins}W ${o.p.played-o.p.wins}L</span>${tick&&o.got>0.004?`<span class="sub pi">${o.p.paidHow==='transfer'?'transfer':'cash'} ${eur(o.got)}${o.p.paidAt?', '+hm(o.p.paidAt):''}</span>`:''}</td>${tick?`<td>${eur(o.court)}<br>${signed(o.pr)}</td>`:`<td>${eur(o.court)}</td><td>${signed(o.pr)}</td>`}<td><b${gets?' style="color:var(--good)"':''}>${o.p.ns?'No-show':gets?'Gets '+eur(-o.due):'Pays '+eur(o.due)}</b>${o.hitCap?'<span class="sub wl">max loss</span>':''}${part?`<span class="sub wl">${eur(o.abs-o.got)} left</span>`:''}</td>${tick?`<td><button class="tick${o.p.paid?' on':part?' part':''}" data-act="paid" data-i="${i}" data-k="${o.k}" aria-label="${gets?'Given to':'Paid by'} ${esc(o.p.name)}: ${o.p.paid?'done':part?'partly':'not yet'}">${o.p.paid?'✓':part?'½':''}</button></td>`:''}</tr>${ed?`<tr class="payrow"><td colspan="4"><div class="payed"><label for="payAmt">Amount ${gets?'given':'received'} (€)</label><input id="payAmt" type="text" inputmode="decimal" value="${(o.got>0.004?o.got:o.abs).toFixed(2)}">
-        <div class="row"><button class="btn grow" data-act="payset" data-how="cash">Cash</button><button class="btn grow" data-act="payset" data-how="transfer">Transfer</button><button class="btn grow danger" data-act="payclear">Not paid</button></div></div></td></tr>`:''}`}).join('')}
+        <div class="row"><button class="btn grow" data-act="payset" data-how="cash">Cash</button><button class="btn grow" data-act="payset" data-how="transfer">Transfer</button><button class="btn grow danger" data-act="payclear">Not paid</button></div></div></td></tr>`:''}`}).join('')).join('')}
     </tbody></table></div>
     ${M.capped?`<p class="sub">Max loss of ${eur(e.maxLoss)} applied. Winners receive ${Math.floor(M.f*100)}% of their winnings, so the money still adds up.</p>`:''}
     ${tick?(z=>z.length?`<span class="label">Did not play a game</span><p class="sub">Tap anyone who did not come. They are taken out of the court split and everyone else's share is worked out again.</p>
@@ -649,6 +705,7 @@ function settleHTML(e,i,tick){
     <div><div class="kv"><span>You collect from players</span><b>${tick?eur(sum(1,true))+' of ':''}${eur(collect)}</b></div>
     <div class="kv"><span>You hand out to winners</span><b>${tick?eur(sum(-1,true))+' of ':''}${eur(pay)}</b></div>
     <div class="kv"><span>Left to pay the court</span><b>${eur(collect-pay)}</b></div>${collect-pay-e.fee>0.004?`<div class="kv"><span>Extra, from rounding the court share up${e.roundShare==='euro'?' to whole euros':''}</span><b>${eur(collect-pay-e.fee)}</b></div>`:''}</div>
+    ${GT?`<span class="label">Per group</span><div>${GT.map(g=>`<div class="kv"><span>${esc(g.name)}${g.collector?' ('+esc(g.collector)+')':g.id?'':' (organizer)'}</span><b>${eur(g.collect-g.give)}</b></div>`).join('')}</div><p class="sub">What each collector hands over to the organizer, after paying the winners in their own group.</p>`:''}
     <div class="row"><button class="btn grow" data-act="copy" data-i="${i}">Copy summary for the group chat</button></div>
     ${copyShown&&copyShown.i===i&&copyShown.kind!=='games'?`<textarea id="sumText" class="sum" readonly rows="8" aria-label="Summary text">${esc(copyShown.text)}</textarea>`:''}`;
 }
@@ -672,7 +729,7 @@ function money(e){
 /* Court share per player, always rounded up so the court is covered.
    'euro' = up to a whole euro (8.04 becomes 9.00); 'cent' = up to the cent, as schedules saved before Nov 22 were settled. */
 function shareOf(fee,n,mode){if(!n)return 0;return mode==='euro'?Math.ceil(fee/n-1e-6):Math.ceil(fee/n*100-1e-6)/100}
-function share(){return shareOf(S.fee,S.players.filter(p=>!p.ns).length,S.roundShare)}
+function share(){return shareOf(S.fee,inSession().filter(p=>!p.ns).length,S.roundShare)}
 function paidOut(){return S.players.reduce((n,p)=>n+p.wins,0)*S.prize}
 
 function linkBanner(){
@@ -683,11 +740,11 @@ function linkBanner(){
     <div class="row"><button class="btn grow" data-act="reload">Try again</button><button class="btn grow" data-act="local">${armLocal?'Tap again to confirm':'I am the organizer: use this phone only'}</button></div></section>`;
 }
 function viewAttend(){
-  const here=active().length,late=listed().length-here;
+  const here=active().length,late=listed().length-here,out=S.players.filter(p=>p.active&&p.out).length;
   return `<section class="card">
-    <header><h2>Who is here right now?</h2><span class="sub">${here} here${late?', '+late+' late':''}</span></header>
-    <p class="sub">Tap anyone who has not arrived yet. A late player still shares the court cost, but is left out of the teams until you mark them as here.</p>
-    <div class="att">${S.players.map(p=>`<button class="here${p.away?' off':''}" data-act="away" data-id="${p.id}" aria-pressed="${p.away?'false':'true'}"><b>${esc(nm(p.id))}</b><span>${p.away?'Late':'Here'}</span></button>`).join('')}</div>
+    <header><h2>Who is playing today?</h2><span class="sub">${here} here${late?', '+late+' late':''}${out?', '+out+' not coming':''}</span></header>
+    <p class="sub">Tap a name to switch between Here, Late and Not coming. Late players share the court cost and join the teams once you mark them as here. Not coming players stay on your list for next time but are left out of today completely.</p>
+    <div class="att">${S.players.filter(p=>p.active).map(p=>{const st=statusOf(p);return `<button class="here st-${st}" data-act="away" data-id="${p.id}" aria-label="${esc(nm(p.id))}: ${statusLabel[st]}"><b>${esc(nm(p.id))}</b><span>${statusLabel[st]}</span></button>`}).join('')}</div>
   </section>
   <button class="btn primary" data-act="start">Start with ${here} player${here===1?'':'s'}</button>
   <button class="btn" data-act="attendback">Back to setup</button>`;
@@ -703,17 +760,18 @@ function viewSetup(){
     <div class="stepper"><button data-act="count" data-n="-1" aria-label="One player fewer">−</button>
       <input id="count" type="number" inputmode="numeric" min="2" max="40" value="${S.players.length}" data-f="count">
       <button data-act="count" data-n="1" aria-label="One player more">+</button></div></div>
-    <p class="sub">${S.players.length>=10?`10 play each game, ${S.players.length-10} rest.`:`Fewer than 10 players, so games are ${Math.floor(S.players.length/2)}v${Math.floor(S.players.length/2)}.`} Court share: <b class="num" id="oShare">${eur(share())}</b> each${S.roundShare==='euro'?', rounded up to whole euros':''}.</p>
+    <p class="sub">${(n=>n>=10?`${n} playing today: 10 play each game, ${n-10} rest.`:`${n} playing today, so games are ${Math.floor(n/2)}v${Math.floor(n/2)}.`)(inSession().length)} Court share: <b class="num" id="oShare">${eur(share())}</b> each${S.roundShare==='euro'?', rounded up to whole euros':''}.</p>
   </section>
   <section class="card">
     <header><h2>Names</h2><span class="sub">Blank keeps “Player 1”</span></header>
     <div class="roster">${S.players.map(p=>`<div class="r"><span class="n">${p.num}</span>
       <input type="text" id="name-${p.id}" data-f="name" data-id="${p.id}" value="${esc(p.name)}" placeholder="Player ${p.num}" maxlength="24" autocomplete="off" aria-label="Name of player ${p.num}">
-      <button class="here${p.away?' off':''}" data-act="away" data-id="${p.id}" aria-pressed="${p.away?'false':'true'}" aria-label="${p.away?'Late':'Here'}: player ${p.num}">${p.away?'Late':'Here'}</button>
+      <button class="here st-${statusOf(p)}" data-act="away" data-id="${p.id}" aria-label="${statusLabel[statusOf(p)]}: player ${p.num}">${statusOf(p)==='out'?'Out':statusLabel[statusOf(p)]}</button>
       <button class="x" data-act="remove" data-id="${p.id}" aria-label="Remove player ${p.num}">×</button></div>`).join('')}</div>
-    <p class="sub">Mark anyone who will arrive late as “Late”. They still share the court cost, but the rotation leaves them out until you switch them to “Here”.</p>
+    <p class="sub">This list is kept for every session. Tap Here to switch to Late, then to Out (not coming today). Out players are not charged and not in the teams, and stay on the list for next time.</p>
     <button class="btn" data-act="add">+ Add player</button>
   </section>
+  ${groupsCard()}
   <section class="card">
     <header><h2>Court and schedule</h2></header>
     ${sessionFields()}
@@ -795,16 +853,16 @@ function viewGame(){
         <div><span class="label dotB">Team B</span><ol class="names">${li(nx.b)}</ol></div></div>
       ${nx.rest.length?`<p class="sub">Resting next: ${csv(nx.rest)}</p>`:''}
     </section>`:''}
-    <p class="sub">Court ${eur(S.fee)} ÷ ${S.players.filter(p=>!p.ns).length} players = <b class="num">${eur(share())}</b> each.</p>
+    <p class="sub">Court ${eur(S.fee)} ÷ ${inSession().filter(p=>!p.ns).length} players = <b class="num">${eur(share())}</b> each.</p>
     <button class="btn danger ctl" data-act="end">${armEnd?(cutoffSide()?'Tap again. Game '+c.n+' counts as a Team '+cutoffSide()+' win at '+c.sa+'–'+c.sb+'.':'Tap again. Game '+c.n+' in progress will not be counted.'):'End session'}</button>`;
 }
 
 function viewPlayers(){
-  const rows=S.players.slice().sort((x,y)=>y.wins-x.wins||y.played-x.played||x.num-y.num),M=money(archiveEntry(S)).rows;
+  const rows=inSession().sort((x,y)=>y.wins-x.wins||y.played-x.played||x.num-y.num),M=money(archiveEntry(S)).rows;
   return `<section class="card">
       <header><h2>Standings</h2><span class="sub">${S.history.length} game${S.history.length===1?'':'s'}</span></header>
       <div class="scroll"><table><thead><tr><th>Player</th><th>Played</th><th>Rest</th><th>W</th><th>L</th><th>Prize</th></tr></thead><tbody>
-      ${rows.map(p=>`<tr class="${p.active?'':'left'}"><td>${esc(nm(p.id))}${p.active?(p.away?' (away)':''):' (left)'}</td><td>${p.played}</td><td>${p.rested}</td><td>${p.wins}</td><td>${p.played-p.wins}</td><td>${signed(M[S.players.indexOf(p)].pr)}</td></tr>`).join('')}
+      ${rows.map(p=>`<tr class="${p.active?'':'left'}"><td>${esc(nm(p.id))}${p.active?(p.away?' (away)':''):' (left)'}</td><td>${p.played}</td><td>${p.rested}</td><td>${p.wins}</td><td>${p.played-p.wins}</td><td>${signed(M[inSession().indexOf(p)].pr)}</td></tr>`).join('')}
       </tbody></table></div>
     </section>
     <section class="card">
@@ -817,7 +875,7 @@ function viewPlayers(){
       <header><h2>Court and prize</h2></header>
       <div>
         ${sessionFields()}
-        <div class="kv"><span>Players sharing the court</span><b>${S.players.filter(p=>!p.ns).length}</b></div>
+        <div class="kv"><span>Players sharing the court</span><b>${inSession().filter(p=>!p.ns).length}</b></div>
         <div class="kv"><span>Each player pays</span><b>${eur(share())}</b></div>
         <div class="kv"><label for="prize">Prize per winning player (€)</label><input id="prize" type="text" inputmode="decimal" data-f="prize" value="${S.prize}" disabled></div>
         <div class="kv"><span>Total prize money won</span><b>${eur(paidOut())}</b></div>
@@ -830,8 +888,10 @@ function viewPlayers(){
         <input type="text" id="name-${p.id}" data-f="name" data-id="${p.id}" value="${esc(p.name)}" placeholder="Player ${p.num}" maxlength="24" autocomplete="off" aria-label="Name of player ${p.num}">
         <button class="here${p.away?' off':''}" data-act="away" data-id="${p.id}" aria-pressed="${p.away?'false':'true'}" aria-label="${p.away?'Away':'Here'}: ${esc(nm(p.id))}">${p.away?'Away':'Here'}</button>
         <button class="x" data-act="remove" data-id="${p.id}" aria-label="Remove ${esc(nm(p.id))}">×</button></div>`).join('')}</div>
+      ${(o=>o.length?`<span class="label">Not coming today</span><div class="att">${o.map(p=>`<button class="here st-out" data-act="cameanyway" data-id="${p.id}"><b>${esc(nm(p.id))}</b><span>Came after all? Tap to add</span></button>`).join('')}</div>`:'')(S.players.filter(p=>p.active&&p.out))}
       <p class="sub">The player list is locked once the session starts. Tap “Here” to take someone out of the rotation (not arrived yet, or taking a break) and “Away” to bring them back; they rejoin level with whoever has played least. Use × only for someone who has left for good.</p>
     </section>`}
+    ${groupsCard()}
     <button class="btn danger ctl" data-act="reset">${resetLabel()}</button>`;
 }
 
@@ -897,7 +957,7 @@ function clock(){
   const low=S.phase==='live'&&now>=a&&now<z&&z-now<=600000,tm=$('.timer');if(tm)tm.classList.toggle('low',low);
   if(low&&warnedEnd!==z&&canWrite){warnedEnd=z;toast(Math.ceil((z-now)/60000)+' minutes of court time left.');try{navigator.vibrate&&navigator.vibrate([200,100,200])}catch(e){}}
 }
-let toastT,attend=false,winLockUntil=0,armWin='',armSwitch=0,armRestore=false,armRedraw=false,payEdit=null,editGame=null,subFor=null,backupText='',restoreOpen=false,restoreDraft='',warnedEnd=0;
+let toastT,attend=false,winLockUntil=0,armWin='',armSwitch=0,armRestore=false,armRedraw=false,payEdit=null,editGame=null,subFor=null,groupsOpen=false,armDelGroup='',backupText='',restoreOpen=false,restoreDraft='',warnedEnd=0;
 function toast(msg,undo){$('#toastMsg').textContent=msg;$('#toastUndo').hidden=!undo;$('#toast').hidden=false;clearTimeout(toastT);toastT=setTimeout(()=>{$('#toast').hidden=true},6000)}
 
 /* ---------- saving ---------- */
@@ -968,6 +1028,7 @@ document.addEventListener('click',e=>{
   else if(act==='add')addPlayer();
   else if(act==='remove')removePlayer(b.dataset.id);
   else if(act==='away')toggleAway(b.dataset.id);
+  else if(act==='cameanyway')cameAnyway(b.dataset.id);
   else if(act==='start')startSession();
   else if(act==='attend'){const m=missing();if(m.length)return needDetails(m);attend=true;render();window.scrollTo(0,0)}
   else if(act==='attendback'){attend=false;render();window.scrollTo(0,0)}
@@ -981,6 +1042,8 @@ document.addEventListener('click',e=>{
   else if(act==='swapwith'){if(subFor)doSwap(subFor,b.dataset.id)}
   else if(act==='subcancel'){subFor=null;render()}
   else if(act==='editgame'){const i=Number(b.dataset.i),n=Number(b.dataset.n);editGame=editGame&&editGame.i===i&&editGame.n===n?null:{i,n};openSet.add(i);render()}
+  else if(act==='addgroup')addGroup();
+  else if(act==='delgroup'){const g=b.dataset.g;if(armDelGroup===g)delGroup(g);else{armDelGroup=g;render();setTimeout(()=>{if(armDelGroup===g){armDelGroup='';softRender()}},4000)}}
   else if(act==='ns')toggleNs(Number(b.dataset.i),Number(b.dataset.k));
   else if(act==='switch'){const n=Number(b.dataset.n);if(armSwitch===n)switchWinner(n);else{armSwitch=n;render();setTimeout(()=>{if(armSwitch===n){armSwitch=0;softRender()}},4000)}}
   else if(act==='backup')copyBackup();
@@ -999,6 +1062,7 @@ document.addEventListener('click',e=>{
 });
 document.addEventListener('change',e=>{
   const el=e.target,f=el.dataset&&el.dataset.f;if(!f||!canWrite)return;
+  if(f==='gname'||f==='gby'||f==='pgroup')return groupChange(el,f);
   if(S.phase!=='setup'&&f!=='name'&&f!=='target')return;
   if(f==='name'){const p=byId(el.dataset.id);if(p){const v=el.value.slice(0,24),k=v.trim().toLowerCase();
     if(k&&S.players.some(x=>x!==p&&x.name.trim().toLowerCase()===k)){el.value=p.name;return toast('Another player is already called '+v.trim()+'. Add an initial so you can tell them apart.')}
@@ -1027,7 +1091,7 @@ document.addEventListener('input',e=>{
   syncHours(S);S.fee=Math.round(S.rate*S.hours*100)/100;liveMoney();
   needsRender=true;stamp();cache();queuePush();
 });
-document.addEventListener('toggle',e=>{const d=e.target;if(d&&d.matches&&d.matches('details.sched')){const i=Number(d.dataset.i);if(d.open)openSet.add(i);else openSet.delete(i)}},true);
+document.addEventListener('toggle',e=>{const d=e.target;if(d&&d.matches&&d.matches('details.grp')){groupsOpen=d.open;return}if(d&&d.matches&&d.matches('details.sched')){const i=Number(d.dataset.i);if(d.open)openSet.add(i);else openSet.delete(i)}},true);
 setInterval(clock,1000);
 
 render();
