@@ -191,7 +191,6 @@ td .wl{display:block;white-space:nowrap}
 td:has(.tick){width:44px;padding-right:0}
 tr.paid td{color:var(--muted)} tr.paid td b{text-decoration:line-through;font-weight:500}
 textarea.sum{width:100%;min-width:0;border:1px solid var(--line);border-radius:10px;background:var(--bg);color:var(--ink);font:13px/1.4 ui-monospace,Menlo,Consolas,monospace;padding:10px;resize:vertical}
-body:not(.setup) [data-act=add]{display:none}
 body.ro .ctl{display:none!important}
 #toast{position:fixed;left:0;right:0;bottom:calc(84px + env(safe-area-inset-bottom,0px));z-index:6;pointer-events:none}
 #toast .wrap>div{pointer-events:auto;background:var(--ink);color:var(--bg);border-radius:12px;padding:10px 14px;display:flex;justify-content:space-between;align-items:center;gap:12px}
@@ -368,8 +367,15 @@ function redraw(){
   refreshNext();commit();
 }
 function addPlayer(){
-  if(S.phase!=='setup')return toast('Players are locked once the session has started');
-  S.players.push(mkPlayer(S));renumber();commit();
+  if(S.phase==='setup'){S.players.push(mkPlayer(S));renumber();return commit()}
+  if(S.phase!=='live')return;
+  /* Someone new turns up: they join the rotation level with whoever has played least, so they are not pushed ahead of anyone. */
+  const p=mkPlayer(S),effs=active().map(x=>x.played+x.offset);
+  p.offset=effs.length?Math.min.apply(null,effs):0;
+  S.players.push(p);if(S.current&&S.current.rest.indexOf(p.id)<0)S.current.rest.push(p.id);
+  logAct('Player added during the session (number '+p.num+')');refreshNext();commit();
+  toast('Player '+p.num+' added. Type the name; they join the rotation from the next game.');
+  setTimeout(()=>{const el=document.getElementById('name-'+p.id);if(el){el.scrollIntoView({block:'center'});el.focus()}},50);
 }
 /* Every action that can change who wins or pays is written down, and shown to everyone in History. */
 function logAct(w){if(S.phase==='setup')return;S.log=S.log||[];S.log.push({t:Date.now(),w});if(S.log.length>200)S.log.shift()}
@@ -414,12 +420,14 @@ function removePlayer(id){
   const p=byId(id);if(!p)return;
   if(S.phase==='setup'){S.players=S.players.filter(x=>x.id!==id);renumber();return commit()}
   const label=nm(id);let redrawn=false;
-  const inHistory=S.history.some(h=>h.a.concat(h.b,h.rest).indexOf(id)>=0);
-  if(inHistory)p.active=false;else S.players=S.players.filter(x=>x.id!==id);
+  /* No games yet: they did not really take part, so they become "Not coming" (not charged, kept on the list for next time).
+     After a game: they are marked as left and still share the court cost. */
+  const played=p.played>0;
+  if(played)p.active=false;else{p.out=true;p.away=false}
   redrawn=pullFromGame(id);
-  logAct(label+(inHistory?' marked as left':' removed from the list')+(redrawn?'; teams redrawn to stay even':''));
+  logAct(label+(played?' marked as left (still shares the court cost)':' marked as not coming (not charged)')+(redrawn?'; teams redrawn to stay even':''));
   refreshNext();commit();
-  toast(label+(inHistory?' marked as left':' removed')+(redrawn?'. Teams were redrawn to stay even.':''));
+  toast(label+(played?' marked as left. They still share the court cost.':' marked as not coming. They are not charged and stay on your list.')+(redrawn?' Teams were redrawn to stay even.':''));
 }
 function renumber(){S.players.forEach((p,i)=>{p.num=i+1;p.id='p'+(i+1)});S.nextId=S.players.length+1}
 function setCount(n){
@@ -887,9 +895,10 @@ function viewPlayers(){
       <div class="roster">${listed().map(p=>`<div class="r"><span class="n">${p.num}</span>
         <input type="text" id="name-${p.id}" data-f="name" data-id="${p.id}" value="${esc(p.name)}" placeholder="Player ${p.num}" maxlength="24" autocomplete="off" aria-label="Name of player ${p.num}">
         <button class="here${p.away?' off':''}" data-act="away" data-id="${p.id}" aria-pressed="${p.away?'false':'true'}" aria-label="${p.away?'Away':'Here'}: ${esc(nm(p.id))}">${p.away?'Away':'Here'}</button>
-        <button class="x" data-act="remove" data-id="${p.id}" aria-label="Remove ${esc(nm(p.id))}">×</button></div>`).join('')}</div>
+        <button class="x" data-act="remove" data-id="${p.id}" aria-label="${p.played?'Mark '+esc(nm(p.id))+' as left':'Mark '+esc(nm(p.id))+' as not coming'}">×</button></div>`).join('')}</div>
+      <button class="btn" data-act="add">+ Add new player</button>
       ${(o=>o.length?`<span class="label">Not coming today</span><div class="att">${o.map(p=>`<button class="here st-out" data-act="cameanyway" data-id="${p.id}"><b>${esc(nm(p.id))}</b><span>Came after all? Tap to add</span></button>`).join('')}</div>`:'')(S.players.filter(p=>p.active&&p.out))}
-      <p class="sub">The player list is locked once the session starts. Tap “Here” to take someone out of the rotation (not arrived yet, or taking a break) and “Away” to bring them back; they rejoin level with whoever has played least. Use × only for someone who has left for good.</p>
+      <p class="sub">Tap “Here” to take someone out of the rotation for a while and “Away” to bring them back. × on someone with no games marks them as not coming (not charged). × on someone who has played marks them as left; they still share the court cost. New and returning players join level with whoever has played least.</p>
     </section>`}
     ${groupsCard()}
     <button class="btn danger ctl" data-act="reset">${resetLabel()}</button>`;
