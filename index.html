@@ -89,6 +89,9 @@ body.setup main.wrap{padding-block:4px 32px}
 details.past.grp{border-top:0;padding-top:0} details.grp summary b{font-family:var(--display);font-size:20px;text-transform:uppercase}
 details.grp>*+*{margin-top:10px}
 tr.grph td{background:var(--bg);text-align:left;white-space:normal;padding-top:10px}
+.glabel{grid-column:1/-1;display:flex;justify-content:space-between;align-items:baseline;gap:8px;flex-wrap:wrap;border-bottom:2px solid var(--ink);padding:10px 0 4px;margin-top:4px}
+.glabel b{font-family:var(--display);font-size:17px;text-transform:uppercase}
+.glabel span{font-size:13px;color:var(--muted)}
 .subbox{display:flex;flex-direction:column;gap:8px;background:var(--bg);border-radius:12px;padding:10px}
 .winrow{display:grid;grid-template-columns:1fr 1fr;gap:10px}
 .win{min-height:72px;border:0;border-radius:14px;font-family:var(--display);font-size:22px;line-height:1.1;padding:0 8px;text-transform:uppercase;color:var(--on-team);letter-spacing:.02em}
@@ -575,6 +578,15 @@ function groupChange(el,f){
   if(f==='gby'){const gid=el.dataset.g;S.players.forEach(p=>{if(p.g===gid)delete p.collect});const p=byId(el.value);if(p&&p.g===gid)p.collect=true;commit();return}
   if(f==='pgroup'){const p=byId(el.dataset.id);if(!p)return;delete p.collect;if(el.value)p.g=el.value;else delete p.g;commit()}
 }
+/* Lists players under a heading per group (in the order the groups were made), then those without a group. */
+function byGroupHTML(list,row){
+  const G=S.groups||[];if(!G.length)return list.map(row).join('');
+  const head=(name,m,c)=>`<div class="glabel"><b>${esc(name)}</b><span>${m.length} player${m.length===1?'':'s'}${c?' · collector: '+esc(nm(c.id)):''}</span></div>`;
+  let out='';
+  G.forEach(g=>{const m=list.filter(p=>p.g===g.id);if(m.length)out+=head(g.name,m,S.players.find(p=>p.g===g.id&&p.collect))+m.map(row).join('')});
+  const rest=list.filter(p=>!G.some(g=>g.id===p.g));if(rest.length)out+=head('No group',rest,null)+rest.map(row).join('');
+  return out;
+}
 function groupsCard(){
   if(!canWrite)return '';
   const G=S.groups||[],L=S.players.filter(p=>p.active),col=g=>L.find(p=>p.g===g.id&&p.collect);
@@ -752,7 +764,7 @@ function viewAttend(){
   return `<section class="card">
     <header><h2>Who is playing today?</h2><span class="sub">${here} here${late?', '+late+' late':''}${out?', '+out+' not coming':''}</span></header>
     <p class="sub">Tap a name to switch between Here, Late and Not coming. Late players share the court cost and join the teams once you mark them as here. Not coming players stay on your list for next time but are left out of today completely.</p>
-    <div class="att">${S.players.filter(p=>p.active).map(p=>{const st=statusOf(p);return `<button class="here st-${st}" data-act="away" data-id="${p.id}" aria-label="${esc(nm(p.id))}: ${statusLabel[st]}"><b>${esc(nm(p.id))}</b><span>${statusLabel[st]}</span></button>`}).join('')}</div>
+    <div class="att">${byGroupHTML(S.players.filter(p=>p.active),p=>{const st=statusOf(p);return `<button class="here st-${st}" data-act="away" data-id="${p.id}" aria-label="${esc(nm(p.id))}: ${statusLabel[st]}"><b>${esc(nm(p.id))}</b><span>${statusLabel[st]}</span></button>`})}</div>
   </section>
   <button class="btn primary" data-act="start">Start with ${here} player${here===1?'':'s'}</button>
   <button class="btn" data-act="attendback">Back to setup</button>`;
@@ -772,10 +784,10 @@ function viewSetup(){
   </section>
   <section class="card">
     <header><h2>Names</h2><span class="sub">Blank keeps “Player 1”</span></header>
-    <div class="roster">${S.players.map(p=>`<div class="r"><span class="n">${p.num}</span>
+    <div class="roster">${byGroupHTML(S.players,p=>`<div class="r"><span class="n">${p.num}</span>
       <input type="text" id="name-${p.id}" data-f="name" data-id="${p.id}" value="${esc(p.name)}" placeholder="Player ${p.num}" maxlength="24" autocomplete="off" aria-label="Name of player ${p.num}">
       <button class="here st-${statusOf(p)}" data-act="away" data-id="${p.id}" aria-label="${statusLabel[statusOf(p)]}: player ${p.num}">${statusOf(p)==='out'?'Out':statusLabel[statusOf(p)]}</button>
-      <button class="x" data-act="remove" data-id="${p.id}" aria-label="Remove player ${p.num}">×</button></div>`).join('')}</div>
+      <button class="x" data-act="remove" data-id="${p.id}" aria-label="Remove player ${p.num}">×</button></div>`)}</div>
     <p class="sub">This list is kept for every session. Tap Here to switch to Late, then to Out (not coming today). Out players are not charged and not in the teams, and stay on the list for next time.</p>
     <button class="btn" data-act="add">+ Add player</button>
   </section>
@@ -892,10 +904,10 @@ function viewPlayers(){
     ${rulesCard()}
     ${S.phase==='done'?'':`<section class="card ctl">
       <header><h2>Roster</h2><span class="sub">${active().length} here${listed().length>active().length?', '+(listed().length-active().length)+' away':''}</span></header>
-      <div class="roster">${listed().map(p=>`<div class="r"><span class="n">${p.num}</span>
+      <div class="roster">${byGroupHTML(listed(),p=>`<div class="r"><span class="n">${p.num}</span>
         <input type="text" id="name-${p.id}" data-f="name" data-id="${p.id}" value="${esc(p.name)}" placeholder="Player ${p.num}" maxlength="24" autocomplete="off" aria-label="Name of player ${p.num}">
         <button class="here${p.away?' off':''}" data-act="away" data-id="${p.id}" aria-pressed="${p.away?'false':'true'}" aria-label="${p.away?'Away':'Here'}: ${esc(nm(p.id))}">${p.away?'Away':'Here'}</button>
-        <button class="x" data-act="remove" data-id="${p.id}" aria-label="${p.played?'Mark '+esc(nm(p.id))+' as left':'Mark '+esc(nm(p.id))+' as not coming'}">×</button></div>`).join('')}</div>
+        <button class="x" data-act="remove" data-id="${p.id}" aria-label="${p.played?'Mark '+esc(nm(p.id))+' as left':'Mark '+esc(nm(p.id))+' as not coming'}">×</button></div>`)}</div>
       <button class="btn" data-act="add">+ Add new player</button>
       ${(o=>o.length?`<span class="label">Not coming today</span><div class="att">${o.map(p=>`<button class="here st-out" data-act="cameanyway" data-id="${p.id}"><b>${esc(nm(p.id))}</b><span>Came after all? Tap to add</span></button>`).join('')}</div>`:'')(S.players.filter(p=>p.active&&p.out))}
       <p class="sub">Tap “Here” to take someone out of the rotation for a while and “Away” to bring them back. × on someone with no games marks them as not coming (not charged). × on someone who has played marks them as left; they still share the court cost. New and returning players join level with whoever has played least.</p>
