@@ -83,7 +83,8 @@ body.setup main.wrap{padding-block:4px 32px}
 .names .pl.on{background:var(--ink);color:var(--bg)}
 .here.swap{border-color:var(--a);background:var(--a-soft)} .here.swap span{color:var(--a)}
 .gbox{display:flex;flex-direction:column;gap:6px;border:1px solid var(--line);border-radius:12px;padding:10px}
-.gbox .grow2{display:grid;grid-template-columns:1fr 44px;gap:8px}
+.gbox .grow2{display:grid;grid-template-columns:minmax(0,1fr) 68px 44px;gap:8px}
+.gbox .grow2 input[data-f=gcode]{text-transform:uppercase;text-align:center;padding:0 6px}
 .gpick{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1.2fr);gap:6px 10px;align-items:center}
 .gpick label{overflow-wrap:anywhere;font-size:15px}
 details.past.grp{border-top:0;padding-top:0} details.grp summary b{font-family:var(--display);font-size:20px;text-transform:uppercase}
@@ -445,7 +446,7 @@ function archiveEntry(o){
   const idx={};
   const players=o.players.filter(p=>!p.out).map((p,i)=>{idx[p.id]=i;const o={name:p.name.trim()||'Player '+p.num,played:p.played,rested:p.rested,wins:p.wins,paid:!!p.paid};if(p.ns)o.ns=true;if(p.g)o.g=p.g;if(p.collect)o.collect=true;if(p.paidAmt!=null){o.paidAmt=p.paidAmt;o.paidHow=p.paidHow;o.paidAt=p.paidAt}return o});
   const ix=ids=>ids.map(id=>idx[id]).filter(k=>k!=null);
-  return{date:o.date,start:o.start,end:o.end,place:o.place,hours:o.hours,fee:o.fee,prize:o.prize,target:o.target,roundShare:o.roundShare||'cent',maxLoss:o.maxLoss||0,groups:(o.groups||[]).map(g=>({id:g.id,name:g.name})),players,log:(o.log||[]).slice(-60),
+  return{date:o.date,start:o.start,end:o.end,place:o.place,hours:o.hours,fee:o.fee,prize:o.prize,target:o.target,roundShare:o.roundShare||'cent',maxLoss:o.maxLoss||0,groups:(o.groups||[]).map(g=>({id:g.id,name:g.name,code:g.code||''})),players,log:(o.log||[]).slice(-60),
     games:o.history.map(h=>({n:h.n,w:h.winner,sa:h.sa||0,sb:h.sb||0,a:ix(h.a),b:ix(h.b)}))};
 }
 function resetLabel(){
@@ -457,7 +458,7 @@ function newSession(){
   let arch=(old.archive||[]).concat(old.history.length?[archiveEntry(old)]:[]),dropped=0;
   while(arch.length>MAX_ARCHIVE){arch.shift();dropped++}
   S.archive=arch;
-  S.groups=(old.groups||[]).map(g=>({id:g.id,name:g.name}));S.nextG=old.nextG||0;
+  S.groups=(old.groups||[]).map(g=>({id:g.id,name:g.name,code:g.code||''}));S.nextG=old.nextG||0;
   old.players.forEach(o=>{const p=mkPlayer(S);p.name=o.name;if(o.g)p.g=o.g;if(o.collect)p.collect=true;S.players.push(p)});
   if(!S.players.length)S=Object.assign(fresh(15),{prize:old.prize,archive:S.archive,rev:old.rev||0});
   while(JSON.stringify(S).length>180000&&S.archive.length>1){S.archive.shift();dropped++}   // stay well under the storage limit of one document
@@ -574,6 +575,7 @@ function toggleNs(i,k){
 function addGroup(){S.groups=S.groups||[];S.nextG=(S.nextG||0)+1;S.groups.push({id:'g'+S.nextG,name:'Group '+(S.groups.length+1)});groupsOpen=true;commit()}
 function delGroup(id){const g=(S.groups||[]).find(x=>x.id===id);if(!g)return;S.groups=S.groups.filter(x=>x.id!==id);S.players.forEach(p=>{if(p.g===id){delete p.g;delete p.collect}});armDelGroup='';commit();toast(g.name+' deleted. Its players have no group now.')}
 function groupChange(el,f){
+  if(f==='gcode'){const g=(S.groups||[]).find(x=>x.id===el.dataset.g);if(!g)return;g.code=el.value.trim().toUpperCase().slice(0,5);commit();return}
   if(f==='gname'){const g=(S.groups||[]).find(x=>x.id===el.dataset.g);if(!g)return;const v=el.value.trim().slice(0,24);if(v)g.name=v;else el.value=g.name;needsRender=true;stamp();cache();queuePush();return}
   if(f==='gby'){const gid=el.dataset.g;S.players.forEach(p=>{if(p.g===gid)delete p.collect});const p=byId(el.value);if(p&&p.g===gid)p.collect=true;commit();return}
   if(f==='pgroup'){const p=byId(el.dataset.id);if(!p)return;delete p.collect;if(el.value)p.g=el.value;else delete p.g;commit()}
@@ -594,7 +596,9 @@ function groupsCard(){
     <summary><b>Groups</b><span class="sub">${G.length?G.length+' group'+(G.length===1?'':'s')+', '+L.filter(p=>p.g).length+' of '+L.length+' players in a group':'Optional. One person collects the payments of each group.'}</span></summary>
     ${G.map(g=>{const m=L.filter(p=>p.g===g.id),c=col(g);return `<div class="gbox">
       <div class="grow2"><input type="text" id="gname-${g.id}" data-f="gname" data-g="${g.id}" value="${esc(g.name)}" maxlength="24" aria-label="Group name">
+        <input type="text" id="gcode-${g.id}" data-f="gcode" data-g="${g.id}" value="${esc(g.code||'')}" placeholder="${esc(codeOf(Object.assign({},g,{code:''})))}" maxlength="5" autocomplete="off" aria-label="Short code for ${esc(g.name)}">
         <button class="x" data-act="delgroup" data-g="${g.id}" aria-label="Delete ${esc(g.name)}">${armDelGroup===g.id?'✓':'×'}</button></div>
+      <p class="sub">Name and short code. The code is shown after names on the Game tab, for example ${esc(m[0]?nm(m[0].id):'Ruwi')} (${esc(codeOf(g))}).</p>
       <label class="sub" for="gby-${g.id}">Collects the payments</label>
       <select id="gby-${g.id}" class="slot" data-f="gby" data-g="${g.id}"><option value="">${m.length?'Nobody yet':'Add players to this group first'}</option>${m.map(p=>`<option value="${p.id}"${c===p?' selected':''}>${esc(nm(p.id))}</option>`).join('')}</select>
       <p class="sub">${m.length?m.length+' player'+(m.length===1?'':'s')+': '+m.map(p=>esc(nm(p.id))).join(', '):'No players yet.'}</p>
@@ -675,7 +679,10 @@ function doSub(outId,inId){
 }
 
 /* ---------- views ---------- */
-const li=ids=>ids.map(id=>'<li>'+esc(nm(id))+'</li>').join('');
+/* Short code of a group, shown after names on the Game tab: the one typed in, else from the name ("Roeselare" → ROE, "Group 2" → G2). */
+function codeOf(g){if(!g)return '';if(g.code&&g.code.trim())return g.code.trim().toUpperCase();const m=/^group\s*(\d+)$/i.exec(g.name.trim());if(m)return 'G'+m[1];return g.name.replace(/[^A-Za-zÀ-ÿ0-9]/g,'').slice(0,3).toUpperCase()}
+const nmg=id=>{const p=byId(id),g=p&&p.g&&(S.groups||[]).find(x=>x.id===p.g);return nm(id)+(g?' ('+codeOf(g)+')':'')};
+const li=ids=>ids.map(id=>'<li>'+esc(nmg(id))+'</li>').join('');   // only used on the Game tab
 const csv=ids=>ids.map(id=>esc(nm(id))).join(', ');
 function sched(){
   if(!S.date||!S.start)return null;
@@ -837,7 +844,7 @@ function viewGame(){
   const hitA=c.sa>=S.target&&c.sa>c.sb, hitB=c.sb>=S.target&&c.sb>c.sa;
   const team=(k,L,ids,sc)=>`<section class="team t${k}"><h3>Team ${L}</h3><div class="score num" aria-label="Team ${L} score">${sc}</div>
     <div class="pts ctl"><button data-act="pt" data-side="${k}" data-n="1">+1</button><button data-act="pt" data-side="${k}" data-n="2">+2<small>three</small></button><button data-act="pt" data-side="${k}" data-n="-1" aria-label="Take one point off Team ${L}">−</button></div>
-    <ol class="names">${canWrite?ids.map(id=>`<li><button class="pl${subFor===id?' on':''}" data-act="subfor" data-id="${id}" aria-pressed="${subFor===id?'true':'false'}">${esc(nm(id))}</button></li>`).join(''):li(ids)}</ol></section>`;
+    <ol class="names">${canWrite?ids.map(id=>`<li><button class="pl${subFor===id?' on':''}" data-act="subfor" data-id="${id}" aria-pressed="${subFor===id?'true':'false'}">${esc(nmg(id))}</button></li>`).join(''):li(ids)}</ol></section>`;
   const nx=S.next;
   return `<div class="timer"><span class="label" id="tLabel">Time left</span><b id="tLeft">--:--:--</b><span class="sub">${schedLine()}</span></div><div class="stats">
       <div><b class="num">${active().length}</b><span class="label">Players</span></div>
@@ -851,9 +858,9 @@ function viewGame(){
       ${canWrite&&subFor&&c.a.concat(c.b).indexOf(subFor)>=0?(()=>{const rs=c.rest.filter(id=>{const p=byId(id);return p&&p.active&&!p.away&&!p.ns});
         const mine=c.a.indexOf(subFor)>=0?'A':'B',opp=mine==='A'?c.b:c.a;
         return `<div class="subbox">${c.started?'':`<span class="label">Swap ${esc(nm(subFor))} with someone on Team ${mine==='A'?'B':'A'}</span>
-          <div class="att">${opp.map(id=>`<button class="here swap" data-act="swapwith" data-id="${id}"><b>${esc(nm(id))}</b><span>${byId(id)?byId(id).wins:0} win${byId(id)&&byId(id).wins===1?'':'s'} today</span></button>`).join('')}</div>`}
+          <div class="att">${opp.map(id=>`<button class="here swap" data-act="swapwith" data-id="${id}"><b>${esc(nmg(id))}</b><span>${byId(id)?byId(id).wins:0} win${byId(id)&&byId(id).wins===1?'':'s'} today</span></button>`).join('')}</div>`}
           <span class="label">${c.started?'Who comes on for '+esc(nm(subFor))+'?':'Or bring on a resting player'}</span>
-          ${rs.length?`<div class="att">${rs.map(id=>{const p=byId(id);return `<button class="here" data-act="subin" data-id="${id}"><b>${esc(nm(id))}</b><span>${p.played} game${p.played===1?'':'s'} so far</span></button>`}).join('')}</div>`:'<p class="sub">Nobody is resting right now.</p>'}
+          ${rs.length?`<div class="att">${rs.map(id=>{const p=byId(id);return `<button class="here" data-act="subin" data-id="${id}"><b>${esc(nmg(id))}</b><span>${p.played} game${p.played===1?'':'s'} so far</span></button>`}).join('')}</div>`:'<p class="sub">Nobody is resting right now.</p>'}
           <button class="btn" data-act="subcancel">Cancel</button></div>`})():(canWrite?`<p class="sub ctl">${c.started?'Tap a player on court to bring on a resting player.':'Tap a player to swap teams or bring on a resting player before the game starts.'}</p>`:'')}
       <div class="winrow ctl${Date.now()<winLockUntil?' wait':''}">
         <button class="win wa${hitA?' hit':''}" data-act="win" data-side="A">Team A won</button>
@@ -909,7 +916,7 @@ function viewPlayers(){
         <button class="here${p.away?' off':''}" data-act="away" data-id="${p.id}" aria-pressed="${p.away?'false':'true'}" aria-label="${p.away?'Away':'Here'}: ${esc(nm(p.id))}">${p.away?'Away':'Here'}</button>
         <button class="x" data-act="remove" data-id="${p.id}" aria-label="${p.played?'Mark '+esc(nm(p.id))+' as left':'Mark '+esc(nm(p.id))+' as not coming'}">×</button></div>`)}</div>
       <button class="btn" data-act="add">+ Add new player</button>
-      ${(o=>o.length?`<span class="label">Not coming today</span><div class="att">${o.map(p=>`<button class="here st-out" data-act="cameanyway" data-id="${p.id}"><b>${esc(nm(p.id))}</b><span>Came after all? Tap to add</span></button>`).join('')}</div>`:'')(S.players.filter(p=>p.active&&p.out))}
+      ${(o=>o.length?`<span class="label">Not coming today (${o.length})</span><div class="att">${byGroupHTML(o,p=>`<button class="here st-out" data-act="cameanyway" data-id="${p.id}"><b>${esc(nm(p.id))}</b><span>Came after all? Tap to add</span></button>`)}</div>`:'')(S.players.filter(p=>p.active&&p.out))}
       <p class="sub">Tap “Here” to take someone out of the rotation for a while and “Away” to bring them back. × on someone with no games marks them as not coming (not charged). × on someone who has played marks them as left; they still share the court cost. New and returning players join level with whoever has played least.</p>
     </section>`}
     ${groupsCard()}
@@ -1083,7 +1090,7 @@ document.addEventListener('click',e=>{
 });
 document.addEventListener('change',e=>{
   const el=e.target,f=el.dataset&&el.dataset.f;if(!f||!canWrite)return;
-  if(f==='gname'||f==='gby'||f==='pgroup')return groupChange(el,f);
+  if(f==='gname'||f==='gcode'||f==='gby'||f==='pgroup')return groupChange(el,f);
   if(S.phase!=='setup'&&f!=='name'&&f!=='target')return;
   if(f==='name'){const p=byId(el.dataset.id);if(p){const v=el.value.slice(0,24),k=v.trim().toLowerCase();
     if(k&&S.players.some(x=>x!==p&&x.name.trim().toLowerCase()===k)){el.value=p.name;return toast('Another player is already called '+v.trim()+'. Add an initial so you can tell them apart.')}

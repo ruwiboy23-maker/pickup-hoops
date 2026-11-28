@@ -1,6 +1,6 @@
 /* Pickup Hoops Tracker service worker.
    Change VERSION whenever you upload a new index.html, so phones pick up the update. */
-const VERSION = 'pickup-hoops-v12';
+const VERSION = 'pickup-hoops-v13';
 const SHELL = ['./', 'index.html', 'manifest.webmanifest', 'icons/icon-192.png', 'icons/icon-512.png', 'icons/icon-maskable-512.png', 'icons/apple-touch-icon.png'];
 
 self.addEventListener('install', e => {
